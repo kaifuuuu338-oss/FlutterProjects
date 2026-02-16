@@ -1,0 +1,10 @@
+BASELINE RISK MODEL - PERFORMANCE METRICS (stacking_smotenc)
+============================================================
+Accuracy:  0.9800
+Precision: 0.9824
+Recall:    0.9800
+F1-Score:  0.9807
+Macro F1:  0.8733
+Balanced Acc: 0.9798
+
+Feature importance not available for this model.

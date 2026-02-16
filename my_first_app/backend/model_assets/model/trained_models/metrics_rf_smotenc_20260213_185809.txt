@@ -1,0 +1,26 @@
+BASELINE RISK MODEL - PERFORMANCE METRICS (rf_smotenc)
+============================================================
+Accuracy:  0.8850
+Precision: 0.8828
+Recall:    0.8850
+F1-Score:  0.8832
+Macro F1:  0.5710
+Balanced Acc: 0.5647
+
+Top 15 Important Features:
+                           feature  importance
+11                     autism_risk    0.231788
+13                   behavior_risk    0.219263
+8                        COG_delay    0.088735
+10                      num_delays    0.085700
+12                       adhd_risk    0.075974
+24            caregiver_engagement    0.051797
+3                         district    0.050323
+7                         LC_delay    0.025444
+6                         FM_delay    0.022423
+9                         SE_delay    0.019766
+2                           mandal    0.018786
+4                 assessment_cycle    0.014573
+0                       age_months    0.013197
+18                 nutrition_score    0.011150
+20  parent_child_interaction_score    0.010826

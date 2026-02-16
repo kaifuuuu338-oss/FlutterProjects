@@ -1,0 +1,10 @@
+BASELINE RISK MODEL - PERFORMANCE METRICS (cascading_no_smote)
+============================================================
+Accuracy:  0.9800
+Precision: 0.9751
+Recall:    0.9800
+F1-Score:  0.9774
+Macro F1:  0.6511
+Balanced Acc: 0.6488
+
+Feature importance not available for this model.

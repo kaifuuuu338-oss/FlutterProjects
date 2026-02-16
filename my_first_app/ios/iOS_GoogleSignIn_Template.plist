@@ -1,0 +1,52 @@
+<!-- 
+    iOS Info.plist Configuration for Google Sign-In
+    
+    Add this content to ios/Runner/Info.plist inside the root <dict> tag
+    
+    IMPORTANT STEPS:
+    1. Replace YOUR_REVERSED_CLIENT_ID with your actual reversed client ID
+       (e.g., if client ID is "123456.apps.googleusercontent.com", 
+        reversed ID is "com.googleusercontent.apps.123456")
+    2. Replace com.example.myFirstApp with your actual bundle ID from Xcode
+    3. Add all key-value pairs inside the main <dict> element
+    
+    You can edit this file in Xcode by:
+    - Open ios/Runner.xcworkspace
+    - Select Runner project
+    - Go to Info tab
+    - Add keys manually OR use source view to paste XML
+-->
+
+<key>CFBundleURLTypes</key>
+<array>
+  <dict>
+    <key>CFBundleTypeRole</key>
+    <string>Editor</string>
+    <key>CFBundleURLSchemes</key>
+    <array>
+      <string>com.googleusercontent.apps.YOUR_REVERSED_CLIENT_ID</string>
+    </array>
+  </dict>
+  <dict>
+    <key>CFBundleTypeRole</key>
+    <string>Editor</string>
+    <key>CFBundleURLSchemes</key>
+    <array>
+      <string>com.example.myFirstApp</string>
+    </array>
+  </dict>
+</array>
+
+<key>LSApplicationQueriesSchemes</key>
+<array>
+  <string>googlechromes</string>
+  <string>itms-apps</string>
+</array>
+
+<!-- Optional: Add photo/camera permissions for profile picture -->
+<key>NSPhotoLibraryUsageDescription</key>
+<string>This app needs access to your photo library for profile pictures.</string>
+<key>NSCameraUsageDescription</key>
+<string>This app needs camera access for taking profile photos.</string>
+<key>NSPhotoLibraryAddUsageDescription</key>
+<string>This app needs to save photos to your library.</string>

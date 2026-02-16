@@ -1,0 +1,10 @@
+BASELINE RISK MODEL - PERFORMANCE METRICS (cascading_smotenc)
+============================================================
+Accuracy:  0.9650
+Precision: 0.9648
+Recall:    0.9650
+F1-Score:  0.9649
+Macro F1:  0.6398
+Balanced Acc: 0.6382
+
+Feature importance not available for this model.

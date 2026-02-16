@@ -1,0 +1,114 @@
+{
+  "age_months": {
+    "6": {
+      "GM": [
+        "Can the child roll over from tummy to back?",
+        "Can the child sit with support?"
+      ],
+      "FM": [
+        "Can the child reach and grasp a toy?",
+        "Can the child transfer object from one hand to another?"
+      ],
+      "LC": [
+        "Does the child respond to familiar voice?",
+        "Does the child make repetitive sounds (ba/ma)?"
+      ],
+      "COG": [
+        "Does the child track moving objects?",
+        "Does the child show curiosity for nearby objects?"
+      ],
+      "SE": [
+        "Does the child smile at familiar people?",
+        "Does the child calm when comforted?"
+      ]
+    },
+    "12": {
+      "GM": [
+        "Can the child stand with support?",
+        "Can the child crawl or move forward?"
+      ],
+      "FM": [
+        "Can the child pick small objects using fingers?",
+        "Can the child bang two objects together?"
+      ],
+      "LC": [
+        "Does the child respond to own name?",
+        "Does the child imitate simple sounds?"
+      ],
+      "COG": [
+        "Does the child find hidden objects?",
+        "Does the child follow one-step gesture commands?"
+      ],
+      "SE": [
+        "Does the child show preference for caregivers?",
+        "Does the child show social smile often?"
+      ]
+    },
+    "18": {
+      "GM": [
+        "Can the child walk without support?",
+        "Can the child squat and stand back up?"
+      ],
+      "FM": [
+        "Can the child stack at least 2 blocks?",
+        "Can the child scribble with crayon?"
+      ],
+      "LC": [
+        "Does the child say at least 3 meaningful words?",
+        "Does the child respond when called by name?"
+      ],
+      "COG": [
+        "Does the child point to objects when named?",
+        "Does the child follow simple one-step instructions?"
+      ],
+      "SE": [
+        "Does the child make eye contact during interaction?",
+        "Does the child engage in simple social play?"
+      ]
+    },
+    "24": {
+      "GM": [
+        "Can the child run steadily?",
+        "Can the child kick a ball forward?"
+      ],
+      "FM": [
+        "Can the child turn pages one by one?",
+        "Can the child draw simple vertical lines?"
+      ],
+      "LC": [
+        "Does the child combine two words?",
+        "Does the child identify familiar objects by name?"
+      ],
+      "COG": [
+        "Can the child sort objects by shape or color?",
+        "Does the child complete simple matching tasks?"
+      ],
+      "SE": [
+        "Does the child play beside other children?",
+        "Does the child show varied emotions appropriately?"
+      ]
+    },
+    "36": {
+      "GM": [
+        "Can the child climb stairs with alternating feet?",
+        "Can the child jump with both feet?"
+      ],
+      "FM": [
+        "Can the child copy a circle?",
+        "Can the child use spoon with minimal spilling?"
+      ],
+      "LC": [
+        "Does the child speak in short sentences?",
+        "Can unfamiliar adults understand most words?"
+      ],
+      "COG": [
+        "Can the child identify basic colors?",
+        "Can the child follow two-step commands?"
+      ],
+      "SE": [
+        "Does the child share toys occasionally?",
+        "Does the child engage in pretend play?"
+      ]
+    }
+  }
+}
