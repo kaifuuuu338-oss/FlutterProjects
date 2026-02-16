@@ -53,234 +53,114 @@ class QuestionBank {
   // 0-12 months (English)
   static const Map<String, List<String>> _q0To12En = {
     'GM': [
-      'Does the baby move both arms and legs equally?',
-      'Can the baby lift their head while lying on the stomach (tummy time)?',
-      'Does the baby hold their head steady without support?',
-      'Can the baby roll over (tummy to back or back to tummy)?',
-      'Can the baby sit with support?',
+      'Does the baby sit without support?',
     ],
     'FM': [
-      'Does the baby grasp your finger when placed in their hand?',
-      'Does the baby bring hands to the mouth?',
-      'Can the baby reach for a toy placed in front of them?',
-      'Can the baby transfer a toy from one hand to the other?',
-      'Does the baby use the whole hand to hold objects (palmar grasp)?',
+      'Does the baby transfer objects from one hand to another?',
     ],
     'LC': [
-      'Does the baby respond to sounds or loud noises?',
-      'Does the baby turn toward a familiar voice?',
-      'Does the baby make cooing or babbling sounds?',
-      'Does the baby laugh or squeal?',
-      'Does the baby respond when their name is called?',
+      'Does the baby respond to their name or babble repeatedly?',
     ],
     'COG': [
-      'Does the baby follow a moving object with their eyes?',
-      'Does the baby look for a toy when it is partially hidden?',
-      'Does the baby explore objects by shaking, banging, or mouthing them?',
-      'Does the baby show curiosity about new objects?',
-      'Does the baby recognize familiar people?',
+      'Does the baby look for a toy when it is hidden?',
     ],
     'SE': [
-      'Does the baby smile in response to others (social smile)?',
-      'Does the baby make eye contact during interaction?',
-      'Does the baby enjoy playing with caregivers?',
-      'Does the baby show stranger anxiety (around 6-9 months)?',
-      'Does the baby express different emotions (happy, upset, excited)?',
+      'Does the baby show attachment to familiar caregivers?',
     ],
   };
 
   // 13-24 months (English)
   static const Map<String, List<String>> _q12To24En = {
     'GM': [
-      'Can the child walk independently without support?',
-      'Can the child run without frequently falling?',
-      'Can the child kick a ball forward?',
-      'Can the child walk up a few stairs with support?',
-      'Can the child stand on tiptoes?',
+      'Is the child walking independently?',
     ],
     'FM': [
-      'Can the child stack 4 or more blocks?',
-      'Can the child turn pages of a book (one at a time)?',
-      'Can the child scribble spontaneously with a crayon?',
-      'Can the child use a spoon with minimal spilling?',
-      'Can the child remove simple clothing (like socks)?',
+      'Can the child pick up small objects using thumb and finger?',
     ],
     'LC': [
-      'Does the child use at least 20-50 meaningful words?',
-      'Does the child combine two words (e.g., "more milk")?',
-      'Can the child follow simple two-step instructions?',
-      'Does the child point to familiar objects when named?',
-      'Does the child name familiar people or objects?',
+      'Does the child say at least 1–3 meaningful words?',
     ],
     'COG': [
-      'Can the child match similar objects (e.g., two same toys)?',
-      'Does the child pretend play (e.g., feeding a doll)?',
-      'Can the child identify body parts when asked?',
-      'Can the child solve simple problems (like moving an object to reach a toy)?',
-      'Does the child understand simple concepts like "big" and "small"?',
+      'Does the child follow simple one-step instructions?',
     ],
     'SE': [
-      'Does the child show affection to familiar people?',
-      'Does the child imitate adult actions (e.g., sweeping, talking on phone)?',
-      'Does the child play alongside other children (parallel play)?',
-      'Does the child show frustration when unable to do something?',
-      'Does the child seek comfort from caregivers when upset?',
+      'Does the child point or gesture to show interest?',
     ],
   };
 
   // 25-36 months (English)
   static const Map<String, List<String>> _q24To36En = {
     'GM': [
-      'Can the child run smoothly without falling frequently?',
-      'Can the child climb well (e.g., onto furniture or playground equipment)?',
-      'Can the child pedal a tricycle?',
-      'Can the child walk up and down stairs using alternate feet?',
-      'Can the child jump forward with both feet together?',
+      'Does the child run steadily and kick a ball?',
     ],
     'FM': [
-      'Can the child copy a simple circle?',
-      'Can the child build a tower of 6-8 blocks?',
-      'Can the child turn door handles or unscrew lids?',
-      'Can the child use a spoon and fork properly?',
-      'Can the child put on simple clothing (like a T-shirt)?',
+      'Can the child stack 4–6 small objects?',
     ],
     'LC': [
-      'Does the child speak in 3-4 word sentences?',
-      'Can the child tell their name and age?',
-      'Is the child\'s speech understandable to familiar adults most of the time?',
-      'Can the child follow three-step instructions?',
-      'Can the child answer simple "what" or "where" questions?',
+      'Does the child use two-word phrases?',
     ],
     'COG': [
-      'Can the child sort objects by color or shape?',
-      'Can the child complete simple puzzles (3-4 pieces)?',
-      'Does the child understand the concept of counting (e.g., counts 1-3)?',
-      'Can the child remember parts of a story?',
-      'Does the child understand basic time concepts like "now" and "later"?',
+      'Can the child match similar objects?',
     ],
     'SE': [
-      'Does the child play cooperatively with other children?',
-      'Can the child take turns during play?',
-      'Does the child show a wide range of emotions?',
-      'Can the child separate from parents without extreme distress?',
-      'Does the child show concern when another child is upset?',
+      'Does the child engage in pretend play?',
     ],
   };
 
   // 37-48 months (English)
   static const Map<String, List<String>> _q36To48En = {
     'GM': [
-      'Can the child hop on one foot for a few seconds?',
-      'Can the child catch a bounced ball most of the time?',
-      'Can the child climb stairs without support using alternating feet?',
-      'Can the child skip or attempt to skip?',
-      'Can the child stand on one foot for at least 5 seconds?',
+      'Can the child jump with both feet?',
     ],
     'FM': [
-      'Can the child copy a square shape?',
-      'Can the child draw a person with at least 3 body parts?',
-      'Can the child cut paper with child-safe scissors?',
-      'Can the child button and unbutton clothes?',
-      'Can the child hold a pencil with a proper grip?',
+      'Can the child draw a simple circle?',
     ],
     'LC': [
-      'Does the child speak in full sentences (5-6 words)?',
-      'Can the child tell a short story about an event?',
-      'Is the child\'s speech understandable to strangers?',
-      'Can the child answer "why" questions?',
-      'Can the child follow complex instructions (3-4 steps)?',
+      'Does the child speak in short sentences clearly?',
     ],
     'COG': [
-      'Can the child name at least four colors correctly?',
-      'Can the child count at least 5 objects accurately?',
-      'Does the child understand the concept of "same" and "different"?',
-      'Can the child complete a simple 6-8 piece puzzle?',
-      'Can the child understand basic sequencing (first, next, last)?',
+      'Can the child identify basic colors?',
     ],
     'SE': [
-      'Does the child prefer playing with other children rather than alone?',
-      'Can the child follow simple rules during games?',
-      'Does the child show empathy toward others?',
-      'Can the child control emotions better than at age 3?',
-      'Does the child show independence in daily activities (toileting, dressing)?',
+      'Does the child play cooperatively with other children?',
     ],
   };
 
   // 49-60 months (English)
   static const Map<String, List<String>> _q48To60En = {
     'GM': [
-      'Can the child skip smoothly?',
-      'Can the child balance on one foot for at least 10 seconds?',
-      'Can the child hop forward multiple times on one foot?',
-      'Can the child catch a small ball with both hands?',
-      'Can the child participate in simple group physical games (e.g., running, chasing)?',
+      'Can the child hop on one foot?',
     ],
     'FM': [
-      'Can the child copy a triangle shape?',
-      'Can the child draw a person with at least 6 body parts?',
-      'Can the child write some letters or numbers?',
-      'Can the child color within the lines mostly?',
-      'Can the child tie a simple knot (or attempt to tie shoelaces)?',
+      'Can the child draw a simple person?',
     ],
     'LC': [
-      'Does the child speak clearly in full, grammatically correct sentences?',
-      'Can the child describe a recent event in detail?',
-      'Can the child understand and use future tense (e.g., "I will go")?',
-      'Can the child follow multi-step instructions (4-5 steps)?',
-      'Can the child answer questions about a story after listening to it?',
+      'Can the child tell a simple story?',
     ],
     'COG': [
-      'Can the child count at least 10 objects correctly?',
-      'Can the child recognize some letters or numbers?',
-      'Does the child understand basic concepts of time (yesterday, today, tomorrow)?',
-      'Can the child solve simple reasoning problems?',
-      'Can the child identify similarities between two objects (e.g., apple and banana are fruits)?',
+      'Can the child count 5–10 objects correctly?',
     ],
     'SE': [
-      'Does the child cooperate and share with other children?',
-      'Can the child follow rules in structured games?',
-      'Does the child express feelings using words rather than only actions?',
-      'Can the child handle minor disappointments without extreme tantrums?',
-      'Does the child show responsibility for small tasks (e.g., cleaning up toys)?',
+      'Does the child follow rules in group play?',
     ],
   };
 
   // 61-72 months (English)
   static const Map<String, List<String>> _q60To72En = {
     'GM': [
-      'Can the child skip with coordination and rhythm?',
-      'Can the child ride a bicycle with or without training wheels?',
-      'Can the child jump rope or attempt coordinated jumping activities?',
-      'Can the child throw and catch a small ball accurately?',
-      'Can the child participate in team physical activities (e.g., simple sports)?',
+      'Can the child skip and maintain balance during play?',
     ],
     'FM': [
-      'Can the child write their full name clearly?',
-      'Can the child draw recognizable pictures with multiple details?',
-      'Can the child cut along a straight or curved line accurately?',
-      'Can the child use proper pencil grip consistently?',
-      'Can the child complete basic crafts (folding paper, gluing shapes neatly)?',
+      'Can the child copy simple shapes like a square?',
     ],
     'LC': [
-      'Can the child speak fluently with clear pronunciation?',
-      'Can the child read simple words or short sentences?',
-      'Can the child understand and answer "how" and "why" questions clearly?',
-      'Can the child retell a short story in sequence?',
-      'Can the child follow classroom instructions independently?',
+      'Can the child speak clearly in full sentences?',
     ],
     'COG': [
-      'Can the child count up to 20 correctly?',
-      'Can the child perform simple addition or subtraction (e.g., 2 + 1)?',
-      'Can the child identify days of the week?',
-      'Can the child understand simple cause-and-effect relationships?',
-      'Can the child categorize objects into groups (e.g., animals, vehicles)?',
+      'Can the child recognize letters or numbers?',
     ],
     'SE': [
-      'Does the child make and maintain friendships?',
-      'Can the child resolve small conflicts with minimal adult help?',
-      'Does the child follow school rules consistently?',
-      'Can the child express feelings appropriately in different situations?',
-      'Does the child show confidence in completing tasks independently?',
+      'Does the child cooperate with peers and control emotions appropriately?',
     ],
   };
 
