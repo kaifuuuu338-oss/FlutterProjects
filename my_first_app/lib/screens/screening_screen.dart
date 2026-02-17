@@ -14,8 +14,7 @@ import 'package:my_first_app/models/screening_model.dart';
 import 'package:my_first_app/widgets/language_menu_button.dart';
 import 'package:my_first_app/core/utils/delay_summary.dart';
 import 'package:my_first_app/core/utils/weighted_scoring_engine.dart';
-import 'package:my_first_app/services/tts_service.dart';
-import 'package:provider/provider.dart';
+
 
 
 class ScreeningScreen extends StatefulWidget {
@@ -70,7 +69,6 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
           languageCode: locale.languageCode,
         );
       });
-      context.read<TtsService>().syncLocale(locale);
     }
   }
 
@@ -123,7 +121,6 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
   Future<void> _saveDomainDraft(String domain) async {
     final domainScores = _computeDomainScores();
     final l10n = AppLocalizations.of(context);
-    final tts = context.watch<TtsService>();
     final localDb = LocalDBService();
     await localDb.initialize();
 
@@ -193,7 +190,6 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
 
   void _onSubmit() async {
     final l10n = AppLocalizations.of(context);
-    final tts = context.watch<TtsService>();
     if (!_allQuestionsAnswered()) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(l10n.t('please_answer_all_questions'))),
@@ -202,140 +198,147 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
     }
 
     setState(() => submitting = true);
+    final domainScores = _computeDomainScores();
+
+    // Convert weighted scores to risk labels using sigmoidal thresholds
+    final domainRiskLevels = <String, String>{};
+    for (final domain in AppConstants.domains) {
+      final score = domainScores[domain] ?? 0.5;
+      domainRiskLevels[domain] = WeightedScoringEngine.domainScoreToRiskLabel(score);
+    }
+
+    // Calculate overall risk from domain scores
+    var overallRisk = WeightedScoringEngine.overallRiskFromDomains(domainScores);
+    var explainability = '';
+    var finalDomainScores = Map<String, double>.from(domainScores);
+    final localDelaySummary = buildDelaySummaryFromResponses(
+      domainResponses.map((k, v) => MapEntry(k, v.values.toList())),
+      ageMonths: widget.ageMonths,
+    );
+    Map<String, int> delaySummary = localDelaySummary ?? {};
+
+    // Load child + save locally (best effort)
+    final localDb = LocalDBService();
+    dynamic child;
     try {
-      final domainScores = _computeDomainScores();
-      
-      // Convert weighted scores to risk labels using sigmoidal thresholds
-      final domainRiskLevels = <String, String>{};
-      for (final domain in AppConstants.domains) {
-        final score = domainScores[domain] ?? 0.5;
-        domainRiskLevels[domain] = WeightedScoringEngine.domainScoreToRiskLabel(score);
-      }
-      
-      // Calculate overall risk from domain scores
-      var overallRisk = WeightedScoringEngine.overallRiskFromDomains(domainScores);
-      var explainability = '';
-      var finalDomainScores = Map<String, double>.from(domainScores);
-      final localDelaySummary = buildDelaySummaryFromResponses(
-        domainResponses.map((k, v) => MapEntry(k, v.values.toList())),
-        ageMonths: widget.ageMonths,
-      );
-      Map<String, int> delaySummary = localDelaySummary ?? {};
-      final localDb = LocalDBService();
       await localDb.initialize();
-      final child = localDb.getChild(widget.childId);
+      child = localDb.getChild(widget.childId);
+    } catch (e) {
+      debugPrint('Local DB init/get error: $e');
+    }
 
-      // Build payload same as API contract
-      final payload = {
-        'child_id': widget.childId,
-        'assessment_type': 'baseline',
-        'assessment_cycle': 'Baseline',
-        'age_months': widget.ageMonths,
-        'gender': child?.gender ?? 'M',
-        'mandal': child?.mandal ?? 'Demo Mandal',
-        'district': child?.district ?? 'Demo District',
-        'aws_code': child?.awcCode ?? 'AWS_DEMO_001',
-        'domain_responses': domainResponses.map((k,v) => MapEntry(k, v.values.toList())),
-        'domain_scores': domainScores,
-        'overall_risk': overallRisk,
-        'consent_given': widget.consentGiven,
-        'consent_timestamp': widget.consentTimestamp.toIso8601String(),
-      };
+    // Build payload same as API contract
+    final payload = {
+      'child_id': widget.childId,
+      'assessment_type': 'baseline',
+      'assessment_cycle': 'Baseline',
+      'age_months': widget.ageMonths,
+      'gender': child?.gender ?? 'M',
+      'mandal': child?.mandal ?? 'Demo Mandal',
+      'district': child?.district ?? 'Demo District',
+      'aws_code': child?.awcCode ?? 'AWS_DEMO_001',
+      'domain_responses': domainResponses.map((k,v) => MapEntry(k, v.values.toList())),
+      'domain_scores': domainScores,
+      'overall_risk': overallRisk,
+      'consent_given': widget.consentGiven,
+      'consent_timestamp': widget.consentTimestamp.toIso8601String(),
+    };
 
-      // Save screening locally (always)
-      final screening = ScreeningModel(
-        screeningId: 'scr_${DateTime.now().millisecondsSinceEpoch}',
-        childId: widget.childId,
-        awwId: widget.awwId,
-        assessmentType: AssessmentType.baseline,
-        ageMonths: widget.ageMonths,
-        domainResponses: domainResponses.map((k, v) => MapEntry(k, v.values.toList())),
-        domainScores: domainScores,
-        overallRisk: RiskLevel.values.firstWhere((e) => e.toString().split('.').last == overallRisk, orElse: () => RiskLevel.low),
-        explainability: l10n.t('rule_based_scoring_placeholder'),
-        missedMilestones: domainResponses.values.fold<int>(0, (acc, m) => acc + m.values.where((v) => v == 0).length),
-        delayMonths: 0,
-        consentGiven: widget.consentGiven,
-        consentTimestamp: widget.consentTimestamp,
-        referralTriggered: false,
-        screeningDate: DateTime.now(),
-        submittedAt: null,
+    final screening = ScreeningModel(
+      screeningId: 'scr_${DateTime.now().millisecondsSinceEpoch}',
+      childId: widget.childId,
+      awwId: widget.awwId,
+      assessmentType: AssessmentType.baseline,
+      ageMonths: widget.ageMonths,
+      domainResponses: domainResponses.map((k, v) => MapEntry(k, v.values.toList())),
+      domainScores: domainScores,
+      overallRisk: RiskLevel.values.firstWhere(
+        (e) => e.toString().split('.').last == overallRisk,
+        orElse: () => RiskLevel.low,
+      ),
+      explainability: l10n.t('rule_based_scoring_placeholder'),
+      missedMilestones: domainResponses.values.fold<int>(0, (acc, m) => acc + m.values.where((v) => v == 0).length),
+      delayMonths: 0,
+      consentGiven: widget.consentGiven,
+      consentTimestamp: widget.consentTimestamp,
+      referralTriggered: false,
+      screeningDate: DateTime.now(),
+      submittedAt: null,
+    );
+
+    try {
+      await localDb.saveScreening(screening);
+    } catch (e) {
+      debugPrint('Local save error: $e');
+    }
+
+    // AI API prediction is the source of truth for risk (best effort)
+    final api = APIService();
+    try {
+      final response = await api.submitScreening(payload);
+      overallRisk = _normalizeRisk('${response['risk_level'] ?? overallRisk}');
+      if (response['domain_scores'] != null) {
+        finalDomainScores = _domainRiskToScoreMap(response['domain_scores']);
+        domainRiskLevels.clear();
+        domainRiskLevels.addAll(_domainRiskLabelMap(response['domain_scores']));
+      }
+      final expRaw = response['explanation'];
+      if (expRaw is List) {
+        explainability = expRaw.map((e) => '- $e').join('\n');
+      } else if (expRaw != null) {
+        explainability = '$expRaw';
+      }
+      final delayRaw = response['delay_summary'];
+      if (delayRaw is Map) {
+        final apiSummary = delayRaw.map((k, v) => MapEntry('$k', (v as num).toInt()));
+        for (final entry in apiSummary.entries) {
+          delaySummary.putIfAbsent(entry.key, () => entry.value);
+        }
+      }
+
+      final riskEnum = RiskLevel.values.firstWhere(
+        (e) => e.toString().split('.').last == overallRisk,
+        orElse: () => RiskLevel.low,
+      );
+      final updated = screening.copyWith(
+        domainScores: finalDomainScores,
+        overallRisk: riskEnum,
+        explainability: explainability,
+        submittedAt: DateTime.now(),
       );
 
-      await localDb.saveScreening(screening);
-
-      // AI API prediction is the source of truth for risk.
-      final api = APIService();
       try {
-        final response = await api.submitScreening(payload);
-        overallRisk = _normalizeRisk('${response['risk_level'] ?? overallRisk}');
-        if (response['domain_scores'] != null) {
-          finalDomainScores = _domainRiskToScoreMap(response['domain_scores']);
-          domainRiskLevels.clear();
-          domainRiskLevels.addAll(_domainRiskLabelMap(response['domain_scores']));
-        }
-        final expRaw = response['explanation'];
-        if (expRaw is List) {
-          explainability = expRaw.map((e) => '- $e').join('\n');
-        } else if (expRaw != null) {
-          explainability = '$expRaw';
-        }
-        final delayRaw = response['delay_summary'];
-        if (delayRaw is Map) {
-          final apiSummary = delayRaw.map((k, v) => MapEntry('$k', (v as num).toInt()));
-          for (final entry in apiSummary.entries) {
-            delaySummary.putIfAbsent(entry.key, () => entry.value);
-          }
-        }
-
-        final riskEnum = RiskLevel.values.firstWhere(
-          (e) => e.toString().split('.').last == overallRisk,
-          orElse: () => RiskLevel.low,
-        );
-        final updated = screening.copyWith(
-          domainScores: finalDomainScores,
-          overallRisk: riskEnum,
-          explainability: explainability,
-          submittedAt: DateTime.now(),
-        );
-
-        // mark as submitted
         await localDb.saveScreening(updated);
       } catch (e) {
-        setState(() => submitting = false);
-        if (!mounted) return;
+        debugPrint('Local update error: $e');
+      }
+    } catch (e) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(AppLocalizations.of(context).t('screening_saved_not_synced'))),
         );
-        Navigator.of(context).pop();
-        return;
       }
-
-      setState(() => submitting = false);
-      if (!mounted) return;
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => BehavioralPsychosocialScreen(
-            prevDomainScores: finalDomainScores,
-            domainRiskLevels: domainRiskLevels,
-            overallRisk: overallRisk,
-            missedMilestones: domainResponses.values.fold<int>(0, (acc, m) => acc + m.values.where((v) => v == 0).length),
-            explainability: explainability,
-            childId: widget.childId,
-            awwId: widget.awwId,
-            ageMonths: widget.ageMonths,
-            delaySummary: delaySummary,
-          ),
-        ),
-      );
-    } catch (e, st) {
-      debugPrint('Submission error: $e\n$st');
-      setState(() => submitting = false);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${AppLocalizations.of(context).t('error_during_submission')}: $e')),
-      );
+      // Continue to next step with local results even if API is unreachable.
+    } finally {
+      if (mounted) setState(() => submitting = false);
     }
+
+    if (!mounted) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => BehavioralPsychosocialScreen(
+          prevDomainScores: finalDomainScores,
+          domainRiskLevels: domainRiskLevels,
+          overallRisk: overallRisk,
+          missedMilestones: domainResponses.values.fold<int>(0, (acc, m) => acc + m.values.where((v) => v == 0).length),
+          explainability: explainability,
+          childId: widget.childId,
+          awwId: widget.awwId,
+          ageMonths: widget.ageMonths,
+          delaySummary: delaySummary,
+        ),
+      ),
+    );
   }
 
   Future<void> _goDashboard() async {
@@ -351,7 +354,6 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
     final count = _localDb.getAllChildren().length;
     if (!mounted) return;
     final l10n = AppLocalizations.of(context);
-    final tts = context.watch<TtsService>();
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -379,7 +381,6 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
 
     if (!mounted) return;
     final l10n = AppLocalizations.of(context);
-    final tts = context.watch<TtsService>();
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -412,7 +413,6 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
 
     if (!mounted) return;
     final l10n = AppLocalizations.of(context);
-    final tts = context.watch<TtsService>();
     if (past.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(l10n.t('no_past_results'))),
@@ -483,7 +483,6 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
 
   Widget _buildNavDrawer() {
     final l10n = AppLocalizations.of(context);
-    final tts = context.watch<TtsService>();
     return Drawer(
       child: SafeArea(
         child: ListView(
@@ -505,7 +504,6 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final tts = context.watch<TtsService>();
     final totalQuestions = _displayQuestions.values.fold<int>(0, (a, b) => a + b.length);
     final answeredQuestions = domainResponses.values.fold<int>(0, (a, b) => a + b.length);
     final progress = totalQuestions == 0 ? 0.0 : answeredQuestions / totalQuestions;
@@ -578,46 +576,6 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
       ),
     );
 
-    final ttsBar = Container(
-      margin: const EdgeInsets.fromLTRB(10, 0, 10, 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFE3ECF5)),
-      ),
-      child: Wrap(
-        crossAxisAlignment: WrapCrossAlignment.center,
-        spacing: 8,
-        runSpacing: 6,
-        children: [
-          const Icon(Icons.record_voice_over, size: 18, color: Color(0xFF2A6EBB)),
-          const Text('Voice', style: TextStyle(fontWeight: FontWeight.w600)),
-          DropdownButton<String>(
-            value: tts.languageCode,
-            onChanged: (v) {
-              if (v != null) tts.setLanguageCode(v);
-            },
-            items: const [
-              DropdownMenuItem(value: 'en-IN', child: Text('English')),
-              DropdownMenuItem(value: 'te-IN', child: Text('Telugu')),
-              DropdownMenuItem(value: 'hi-IN', child: Text('Hindi')),
-            ],
-          ),
-          IconButton(
-            icon: const Icon(Icons.pause_circle, color: Color(0xFF6A7580)),
-            onPressed: tts.isSpeaking ? tts.pause : null,
-            tooltip: 'Pause',
-          ),
-          IconButton(
-            icon: const Icon(Icons.stop_circle, color: Color(0xFFE14B49)),
-            onPressed: tts.isSpeaking ? tts.stop : null,
-            tooltip: 'Stop',
-          ),
-        ],
-      ),
-    );
-
     final domainsList = ListView(
       children: AppConstants.domains.map((d) {
         final questions = _displayQuestions[d] ?? [];
@@ -628,7 +586,6 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
           responses: domainResponses[d] ?? {},
           onChanged: (map) => _onDomainChanged(d, map),
           onSave: () => _saveDomainDraft(d),
-          onSpeakQuestion: (q) => tts.speak(q),
           saveLabel: l10n.t('save_topic'),
           yesLabel: l10n.t('yes'),
           noLabel: l10n.t('no'),
@@ -656,7 +613,6 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
         body: Column(
           children: [
             headerCard,
-            ttsBar,
             Expanded(child: domainsList),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
@@ -735,7 +691,6 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
                     child: Column(
                       children: [
                         headerCard,
-                        ttsBar,
                         Expanded(child: domainsList),
                         Padding(
                           padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
