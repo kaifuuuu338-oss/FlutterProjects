@@ -9,7 +9,6 @@ import 'package:my_first_app/screens/result_screen.dart';
 import 'package:my_first_app/screens/settings_screen.dart';
 import 'package:my_first_app/services/local_db_service.dart';
 import 'package:my_first_app/widgets/language_menu_button.dart';
-import 'package:my_first_app/core/utils/delay_summary.dart';
 
 class ChildRegistrationScreen extends StatefulWidget {
   const ChildRegistrationScreen({super.key});
@@ -32,7 +31,7 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
   final TextEditingController _dobController = TextEditingController();
 
   DateTime? _dob;
-  String _gender = 'M';
+  final String _gender = 'M';
   String _assessmentCycle = 'Baseline';
   String? _district;
   String? _mandal;
@@ -199,10 +198,6 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
         itemBuilder: (context, index) {
           final s = past[index];
           final risk = s.overallRisk.toString().split('.').last;
-          final delaySummary = buildDelaySummaryFromResponses(
-            s.domainResponses,
-            ageMonths: s.ageMonths,
-          );
           return ListTile(
             title: Text('${s.childId} - ${AppLocalizations.of(context).t(risk.toLowerCase()).toUpperCase()}'),
             subtitle: Text(AppLocalizations.of(context).t('date_label', {'date': '${s.screeningDate.toLocal()}'})),
@@ -219,7 +214,6 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                     childId: s.childId,
                     awwId: s.awwId,
                     ageMonths: s.ageMonths,
-                    delaySummary: delaySummary,
                   ),
                 ),
               );
@@ -416,7 +410,7 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                       const SizedBox(height: 12),
 
                       DropdownButtonFormField<String>(
-                        value: _district,
+                        initialValue: _district,
                         items: _districts
                             .map((d) => DropdownMenuItem<String>(
                                   value: d,
@@ -438,7 +432,7 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                       const SizedBox(height: 12),
 
                       DropdownButtonFormField<String>(
-                        value: _mandal,
+                        initialValue: _mandal,
                         items: _mandalsForDistrict
                             .map((m) => DropdownMenuItem<String>(
                                   value: m,
@@ -459,7 +453,7 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                       const SizedBox(height: 12),
 
                       DropdownButtonFormField<String>(
-                        value: _assessmentCycle,
+                        initialValue: _assessmentCycle,
                         items: _assessmentCycles
                             .map((c) => DropdownMenuItem<String>(
                                   value: c,

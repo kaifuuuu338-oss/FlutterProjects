@@ -1,0 +1,16 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Screening</title>
+  </head>
+  <body>
+    <h1>Screening (placeholder form)</h1>
+    <form method="post">
+      {% csrf_token %}
+      <label>Child name: <input name="child_name" /></label><br/>
+      <label>Age months: <input name="age_months" /></label><br/>
+      <button type="submit">Submit</button>
+    </form>
+  </body>
+</html>

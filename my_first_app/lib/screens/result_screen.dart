@@ -1,5 +1,4 @@
 ﻿import 'package:flutter/material.dart';
-import 'package:my_first_app/core/constants/app_constants.dart';
 import 'package:my_first_app/core/localization/app_localizations.dart';
 import 'package:my_first_app/models/child_model.dart';
 import 'package:my_first_app/models/screening_model.dart' as sm;
@@ -8,7 +7,6 @@ import 'package:my_first_app/screens/referral_screen.dart';
 import 'package:my_first_app/screens/settings_screen.dart';
 import 'package:my_first_app/services/local_db_service.dart';
 import 'package:my_first_app/widgets/language_menu_button.dart';
-import 'package:my_first_app/core/utils/delay_summary.dart';
 
 class ResultScreen extends StatefulWidget {
   final Map<String, double> domainScores;
@@ -231,10 +229,6 @@ class _ResultScreenState extends State<ResultScreen> {
         itemBuilder: (context, index) {
           final s = past[index];
           final risk = s.overallRisk.toString().split('.').last;
-          final delaySummary = buildDelaySummaryFromResponses(
-            s.domainResponses,
-            ageMonths: s.ageMonths,
-          );
           return ListTile(
             title: Text('${s.childId} - ${l10n.t(risk.toLowerCase()).toUpperCase()}'),
             subtitle: Text(l10n.t('date_label', {'date': '${s.screeningDate.toLocal()}'})),
@@ -251,7 +245,6 @@ class _ResultScreenState extends State<ResultScreen> {
                     childId: s.childId,
                     awwId: s.awwId,
                     ageMonths: s.ageMonths,
-                    delaySummary: delaySummary,
                   ),
                 ),
               );
