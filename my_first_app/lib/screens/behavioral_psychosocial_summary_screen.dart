@@ -100,7 +100,6 @@ class BehavioralPsychosocialSummaryScreen extends StatelessWidget {
                 _infoRow(l10n.t('autism_risk'), _riskBadge(autismLabel)),
                 _infoRow(l10n.t('adhd_risk'), _riskBadge(adhdLabel)),
                 _infoRow(l10n.t('behavior_risk'), _riskBadge(behaviorLabel)),
-                _infoRow(l10n.t('overall_risk'), _riskBadge(overallRiskLabel)),
               ],
             ),
           ),
@@ -237,7 +236,7 @@ class BehavioralPsychosocialSummaryScreen extends StatelessWidget {
                 Expanded(
                   child: Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
                 ),
-                if (trailing != null) trailing!,
+                if (trailing case final t?) t,
               ],
             ),
             const SizedBox(height: 10),
