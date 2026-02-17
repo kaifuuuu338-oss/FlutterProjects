@@ -18,6 +18,7 @@ import 'package:my_first_app/screens/settings_screen.dart';
 import 'package:my_first_app/services/auth_service.dart';
 import 'package:my_first_app/services/local_db_service.dart';
 import 'package:my_first_app/widgets/language_menu_button.dart';
+import 'package:my_first_app/core/utils/delay_summary.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -381,6 +382,10 @@ class _DashboardScreenState extends State<DashboardScreen> with RouteAware {
         itemBuilder: (context, index) {
           final s = past[index];
           final risk = s.overallRisk.toString().split('.').last;
+          final delaySummary = buildDelaySummaryFromResponses(
+            s.domainResponses,
+            ageMonths: s.ageMonths,
+          );
           return ListTile(
             title: Text('${s.childId} - ${AppLocalizations.of(context).t(risk.toLowerCase()).toUpperCase()}'),
             subtitle: Text(AppLocalizations.of(context).t('date_label', {'date': '${s.screeningDate.toLocal()}'})),
@@ -397,6 +402,7 @@ class _DashboardScreenState extends State<DashboardScreen> with RouteAware {
                     childId: s.childId,
                     awwId: s.awwId,
                     ageMonths: s.ageMonths,
+                    delaySummary: delaySummary,
                   ),
                 ),
               );

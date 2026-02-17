@@ -8,6 +8,7 @@ import 'package:my_first_app/screens/screening_screen.dart';
 import 'package:my_first_app/screens/settings_screen.dart';
 import 'package:my_first_app/services/local_db_service.dart';
 import 'package:my_first_app/widgets/language_menu_button.dart';
+import 'package:my_first_app/core/utils/delay_summary.dart';
 
 class ConsentScreen extends StatefulWidget {
   final String childId;
@@ -97,6 +98,10 @@ class _ConsentScreenState extends State<ConsentScreen> {
         itemBuilder: (context, index) {
           final s = past[index];
           final risk = s.overallRisk.toString().split('.').last;
+          final delaySummary = buildDelaySummaryFromResponses(
+            s.domainResponses,
+            ageMonths: s.ageMonths,
+          );
           return ListTile(
             title: Text('${s.childId} - ${l10n.t(risk.toLowerCase()).toUpperCase()}'),
             subtitle: Text(l10n.t('date_label', {'date': s.screeningDate.toLocal().toString()})),
@@ -113,6 +118,7 @@ class _ConsentScreenState extends State<ConsentScreen> {
                     childId: s.childId,
                     awwId: s.awwId,
                     ageMonths: s.ageMonths,
+                    delaySummary: delaySummary,
                   ),
                 ),
               );
