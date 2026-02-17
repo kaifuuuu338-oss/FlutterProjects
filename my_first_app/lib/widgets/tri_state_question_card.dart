@@ -8,6 +8,7 @@ class TriStateQuestionCard extends StatelessWidget {
   final List<String> labels; // length must be 3
   final ValueChanged<int> onChanged;
   final IconData? icon;
+  final VoidCallback? onSpeak;
 
   const TriStateQuestionCard({
     super.key,
@@ -16,6 +17,7 @@ class TriStateQuestionCard extends StatelessWidget {
     required this.labels,
     required this.onChanged,
     this.icon,
+    this.onSpeak,
   }) : assert(labels.length == 3);
 
   @override
@@ -41,7 +43,19 @@ class TriStateQuestionCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(question, style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700)),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(question, style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700)),
+                    ),
+                    if (onSpeak != null)
+                      IconButton(
+                        icon: const Icon(Icons.volume_up, size: 20),
+                        onPressed: onSpeak,
+                        tooltip: 'Listen',
+                      ),
+                  ],
+                ),
                 const SizedBox(height: 8),
                 Row(
                   children: List.generate(3, (i) {

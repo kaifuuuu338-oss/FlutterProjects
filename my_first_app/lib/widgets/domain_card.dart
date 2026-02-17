@@ -11,6 +11,7 @@ class DomainCard extends StatefulWidget {
   final String saveLabel;
   final String yesLabel;
   final String noLabel;
+  final ValueChanged<String>? onSpeakQuestion;
 
   const DomainCard({
     super.key,
@@ -23,6 +24,7 @@ class DomainCard extends StatefulWidget {
     this.saveLabel = 'Save Topic',
     this.yesLabel = 'Yes',
     this.noLabel = 'No',
+    this.onSpeakQuestion,
   });
 
   @override
@@ -98,6 +100,7 @@ class _DomainCardState extends State<DomainCard> {
                 onChanged: (v) => _updateResponse(i, v),
                 yesLabel: widget.yesLabel,
                 noLabel: widget.noLabel,
+                onSpeak: widget.onSpeakQuestion == null ? null : () => widget.onSpeakQuestion!(q),
               );
             }),
           if (expanded)
