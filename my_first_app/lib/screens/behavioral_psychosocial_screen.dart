@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:my_first_app/core/localization/app_localizations.dart';
 import 'package:my_first_app/widgets/tri_state_question_card.dart';
 import 'package:my_first_app/screens/behavioral_psychosocial_summary_screen.dart';
@@ -9,8 +10,7 @@ import 'package:my_first_app/services/api_service.dart';
 import 'package:my_first_app/models/screening_model.dart';
 import 'package:my_first_app/models/child_model.dart';
 import 'package:my_first_app/core/constants/app_constants.dart';
-import 'package:my_first_app/services/tts_service.dart';
-import 'package:provider/provider.dart';
+
 
 class BehavioralPsychosocialScreen extends StatefulWidget {
   final Map<String, double> prevDomainScores;
@@ -58,8 +58,6 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
   bool _submitting = false;
 
   ChildModel? _child;
-  Locale? _currentLocale;
-
   void _showError(AppLocalizations l10n, String message) {
     final messenger = ScaffoldMessenger.of(context);
     messenger.hideCurrentMaterialBanner();
@@ -83,20 +81,19 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
     _loadChild();
   }
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final locale = Localizations.localeOf(context);
-    if (_currentLocale?.languageCode != locale.languageCode) {
-      _currentLocale = locale;
-      context.read<TtsService>().syncLocale(locale);
-    }
-  }
-
   Future<void> _loadChild() async {
-    await _localDb.initialize();
-    final c = _localDb.getChild(widget.childId);
-    setState(() => _child = c);
+    if (kIsWeb) {
+      setState(() => _child = null);
+      return;
+    }
+    try {
+      await _localDb.initialize();
+      final c = _localDb.getChild(widget.childId);
+      setState(() => _child = c);
+    } catch (e) {
+      debugPrint('Local DB init/get error: $e');
+      setState(() => _child = null);
+    }
   }
 
   @override
@@ -247,7 +244,6 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
   Future<void> _submit() async {
     // Validate at least one section completed
     final l10n = AppLocalizations.of(context);
-    final tts = context.watch<TtsService>();
 
     // Enforce that all shown sections are fully answered
     if (widget.ageMonths >= 12 && widget.ageMonths <= 48) {
@@ -428,7 +424,13 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
       submittedAt: null,
     );
 
-    await _localDb.saveScreening(screening);
+    if (!kIsWeb) {
+      try {
+        await _localDb.saveScreening(screening);
+      } catch (e) {
+        debugPrint('Local save error: $e');
+      }
+    }
 
     // Build payload for rule engine (API)
     final payload = {
@@ -462,7 +464,13 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
     try {
       await _api.submitScreening(payload);
       final updated = screening.copyWith(submittedAt: DateTime.now());
-      await _localDb.saveScreening(updated);
+      if (!kIsWeb) {
+        try {
+          await _localDb.saveScreening(updated);
+        } catch (e) {
+          debugPrint('Local update error: $e');
+        }
+      }
     } catch (_) {
       // ignore network errors — screening stays in local DB for sync
     }
@@ -520,48 +528,7 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final tts = context.watch<TtsService>();
     final stepText = l10n.t('step_label', {'step': '2', 'of': '5'});
-
-    final ttsBar = Container(
-      margin: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFE3ECF5)),
-      ),
-      child: Wrap(
-        crossAxisAlignment: WrapCrossAlignment.center,
-        spacing: 8,
-        runSpacing: 6,
-        children: [
-          const Icon(Icons.record_voice_over, size: 18, color: Color(0xFF2A6EBB)),
-          const Text('Voice', style: TextStyle(fontWeight: FontWeight.w600)),
-          DropdownButton<String>(
-            value: tts.languageCode,
-            onChanged: (v) {
-              if (v != null) tts.setLanguageCode(v);
-            },
-            items: const [
-              DropdownMenuItem(value: 'en-IN', child: Text('English')),
-              DropdownMenuItem(value: 'te-IN', child: Text('Telugu')),
-              DropdownMenuItem(value: 'hi-IN', child: Text('Hindi')),
-            ],
-          ),
-          IconButton(
-            icon: const Icon(Icons.pause_circle, color: Color(0xFF6A7580)),
-            onPressed: tts.isSpeaking ? tts.pause : null,
-            tooltip: 'Pause',
-          ),
-          IconButton(
-            icon: const Icon(Icons.stop_circle, color: Color(0xFFE14B49)),
-            onPressed: tts.isSpeaking ? tts.stop : null,
-            tooltip: 'Stop',
-          ),
-        ],
-      ),
-    );
 
     return Scaffold(
       appBar: AppBar(
@@ -606,7 +573,6 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
               ],
             ),
           ),
-          ttsBar,
           Expanded(
             child: ListView(
               padding: const EdgeInsets.all(12),
@@ -622,7 +588,6 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
                       labels: _yesSometimesNo,
                       value: _autismAnswers[i],
                       onChanged: (v) => setState(() => _autismAnswers[i] = v),
-                      onSpeak: () => tts.speak(_autismPositive[i]),
                     );
                   }),
                   const SizedBox(height: 6),
@@ -634,7 +599,6 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
                       labels: _yesSometimesNo,
                       value: _autismAnswers[idx],
                       onChanged: (v) => setState(() => _autismAnswers[idx] = v),
-                      onSpeak: () => tts.speak(_autismRedFlags[i]),
                     );
                   }),
                 ],
@@ -652,7 +616,6 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
                       labels: _neverSometimesOften,
                       value: _adhdAnswers[i],
                       onChanged: (v) => setState(() => _adhdAnswers[i] = v),
-                      onSpeak: () => tts.speak(_adhdQuestions[i]),
                     );
                   }),
                 ],
@@ -669,7 +632,6 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
                     labels: _noSometimesYes,
                     value: _behaviorAnswers[i],
                     onChanged: (v) => setState(() => _behaviorAnswers[i] = v),
-                    onSpeak: () => tts.speak(_behaviorQuestions[i]),
                   );
                 }),
 

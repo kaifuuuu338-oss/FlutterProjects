@@ -4,7 +4,6 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 import 'package:my_first_app/core/localization/app_localizations.dart';
 import 'package:my_first_app/core/localization/locale_provider.dart';
-import 'package:my_first_app/services/tts_service.dart';
 import 'package:my_first_app/core/navigation/app_route_observer.dart';
 import 'package:my_first_app/core/theme/app_theme.dart';
 import 'package:my_first_app/services/local_db_service.dart';
@@ -27,11 +26,8 @@ Future<void> main() async {
   final localeProvider = LocaleProvider();
   await localeProvider.loadSavedLocale();
   runApp(
-    MultiProvider(
-      providers: [
-        ChangeNotifierProvider.value(value: localeProvider),
-        ChangeNotifierProvider(create: (_) => TtsService()),
-      ],
+    ChangeNotifierProvider.value(
+      value: localeProvider,
       child: const MyApp(),
     ),
   );
