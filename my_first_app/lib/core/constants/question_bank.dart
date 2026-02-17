@@ -50,117 +50,237 @@ class QuestionBank {
     '61-72': _q60To72Hi,
   };
 
-  // 0-12 months (English)
+  // 0-12 months (English) - Using 3-6 months questions
   static const Map<String, List<String>> _q0To12En = {
     'GM': [
-      'Does the baby sit without support?',
+      'Holds head steady without support?',
+      'Rolls from tummy to back?',
+      'Pushes up on arms during tummy time?',
+      'Bears some weight on legs when held?',
+      'No head control by 6 months? (Red Flag)',
     ],
     'FM': [
-      'Does the baby transfer objects from one hand to another?',
+      'Reaches for nearby objects?',
+      'Grasps and briefly shakes toy?',
+      'Brings objects to mouth?',
+      'Opens and closes hands freely?',
+      'Does not reach for objects? (Red Flag)',
     ],
     'LC': [
-      'Does the baby respond to their name or babble repeatedly?',
+      'Babbles simple sounds (ba, ma)?',
+      'Laughs aloud?',
+      'Turns toward sound consistently?',
+      'Vocalizes to express pleasure or discomfort?',
+      'No social vocalization? (Red Flag)',
     ],
     'COG': [
-      'Does the baby look for a toy when it is hidden?',
+      'Explores objects visually?',
+      'Recognizes caregiver?',
+      'Anticipates feeding routines?',
+      'Shows curiosity toward new objects?',
+      'No visual interest? (Red Flag)',
     ],
     'SE': [
-      'Does the baby show attachment to familiar caregivers?',
+      'Smiles socially?',
+      'Enjoys interactive play?',
+      'Responds to familiar caregivers?',
+      'Shows pleasure or displeasure clearly?',
+      'No social engagement? (Red Flag)',
     ],
   };
 
-  // 13-24 months (English)
+  // 13-24 months (English) - 12-24 months clinical milestones
   static const Map<String, List<String>> _q12To24En = {
     'GM': [
-      'Is the child walking independently?',
+      'Walks independently?',
+      'Squats to pick up toy and stands again?',
+      'Climbs onto low furniture?',
+      'Begins to run stiffly?',
+      'Not walking independently by 18 months? (Red Flag)',
     ],
     'FM': [
-      'Can the child pick up small objects using thumb and finger?',
+      'Picks up small objects using thumb and forefinger (pincer grasp)?',
+      'Stacks 2–4 blocks?',
+      'Scribbles spontaneously?',
+      'Uses spoon with spilling?',
+      'Cannot grasp small objects? (Red Flag)',
     ],
     'LC': [
-      'Does the child say at least 1–3 meaningful words?',
+      'Uses at least 10–20 meaningful words?',
+      'Points to indicate wants?',
+      'Understands simple instructions?',
+      'Names familiar objects or people?',
+      'No single words by 18 months? (Red Flag)',
     ],
     'COG': [
-      'Does the child follow simple one-step instructions?',
+      'Imitates household activities?',
+      'Engages in simple pretend play?',
+      'Finds hidden object easily?',
+      'Matches similar objects?',
+      'No purposeful play? (Red Flag)',
     ],
     'SE': [
-      'Does the child point or gesture to show interest?',
+      'Shows separation anxiety from caregiver?',
+      'Seeks comfort when upset?',
+      'Imitates others\' actions?',
+      'Shows affection to familiar people?',
+      'No emotional response or social engagement? (Red Flag)',
     ],
   };
 
-  // 25-36 months (English)
+  // 25-36 months (English) - 24-36 months clinical milestones
   static const Map<String, List<String>> _q24To36En = {
     'GM': [
-      'Does the child run steadily and kick a ball?',
+      'Walks and runs without frequent falling?',
+      'Climbs stairs holding railing or hand?',
+      'Jumps with both feet?',
+      'Kicks ball forward?',
+      'Cannot walk steadily? (Red Flag)',
     ],
     'FM': [
-      'Can the child stack 4–6 small objects?',
+      'Stacks 4–6 blocks?',
+      'Turns pages one at a time?',
+      'Imitates vertical and circular strokes?',
+      'Uses spoon with minimal spilling?',
+      'Cannot grasp or manipulate small objects? (Red Flag)',
     ],
     'LC': [
-      'Does the child use two-word phrases?',
+      'Uses at least 20–50 words?',
+      'Combines two words?',
+      'Names familiar objects?',
+      'Follows simple two-step commands?',
+      'No two-word phrases by 30 months? (Red Flag)',
     ],
     'COG': [
-      'Can the child match similar objects?',
+      'Engages in pretend play?',
+      'Matches shapes and colors?',
+      'Completes simple puzzles (2–4 pieces)?',
+      'Understands cause and effect?',
+      'No purposeful play? (Red Flag)',
     ],
     'SE': [
-      'Does the child engage in pretend play?',
+      'Plays beside other children (parallel play)?',
+      'Shows independence in daily tasks?',
+      'Expresses emotions clearly?',
+      'Seeks comfort from caregiver?',
+      'No interest in social interaction? (Red Flag)',
     ],
   };
 
-  // 37-48 months (English)
+  // 37-48 months (English) - 3-4 years clinical milestones
   static const Map<String, List<String>> _q36To48En = {
     'GM': [
-      'Can the child jump with both feet?',
+      'Runs smoothly without frequent falls?',
+      'Jumps forward with both feet?',
+      'Climbs stairs alternating feet?',
+      'Balances on one foot for 3–5 seconds?',
+      'Frequent falls or poor coordination? (Red Flag)',
     ],
     'FM': [
-      'Can the child draw a simple circle?',
+      'Copies straight lines and circles?',
+      'Strings large beads?',
+      'Builds tower of 8–10 blocks?',
+      'Holds crayon with tripod grasp?',
+      'Cannot manipulate small objects? (Red Flag)',
     ],
     'LC': [
-      'Does the child speak in short sentences clearly?',
+      'Speaks in 3–4 word sentences?',
+      'Names familiar objects and people?',
+      'Asks simple questions?',
+      'Follows 2–3 step commands?',
+      'Speech mostly unintelligible? (Red Flag)',
     ],
     'COG': [
-      'Can the child identify basic colors?',
+      'Completes 4–6 piece puzzles?',
+      'Sorts objects by shape or color?',
+      'Engages in imaginative play?',
+      'Understands simple concepts (big/small, in/out)?',
+      'No pretend or problem-solving play? (Red Flag)',
     ],
     'SE': [
-      'Does the child play cooperatively with other children?',
+      'Plays cooperatively with peers?',
+      'Takes turns during play?',
+      'Shows empathy toward others?',
+      'Follows simple group rules?',
+      'Severe aggression or social withdrawal? (Red Flag)',
     ],
   };
 
-  // 49-60 months (English)
+  // 49-60 months (English) - 4-5 years clinical milestones
   static const Map<String, List<String>> _q48To60En = {
     'GM': [
-      'Can the child hop on one foot?',
+      'Hops on one foot?',
+      'Runs smoothly with good coordination?',
+      'Climbs stairs alternating feet confidently?',
+      'Balances on one foot for 8–10 seconds?',
+      'Frequent falls or major coordination difficulty? (Red Flag)',
     ],
     'FM': [
-      'Can the child draw a simple person?',
+      'Copies square and cross?',
+      'Draws a person with 4–6 body parts?',
+      'Cuts along straight and curved lines?',
+      'Uses pencil with mature tripod grasp?',
+      'Cannot copy basic shapes or control pencil? (Red Flag)',
     ],
     'LC': [
-      'Can the child tell a simple story?',
+      'Speaks clearly in full sentences?',
+      'Tells simple stories?',
+      'Answers "why" and "how" questions?',
+      'Understands positional and descriptive words?',
+      'Speech unclear to unfamiliar listeners? (Red Flag)',
     ],
     'COG': [
-      'Can the child count 5–10 objects correctly?',
+      'Counts to 10 or more?',
+      'Identifies basic colors and shapes?',
+      'Completes 6–8 piece puzzles?',
+      'Understands same and different?',
+      'Cannot complete structured problem-solving tasks? (Red Flag)',
     ],
     'SE': [
-      'Does the child follow rules in group play?',
+      'Plays cooperatively in group games?',
+      'Follows classroom rules?',
+      'Shows empathy toward peers?',
+      'Manages frustration with minimal support?',
+      'Extreme aggression, withdrawal, or emotional dysregulation? (Red Flag)',
     ],
   };
 
-  // 61-72 months (English)
+  // 61-72 months (English) - 5-6 years milestone questions
   static const Map<String, List<String>> _q60To72En = {
     'GM': [
       'Can the child skip and maintain balance during play?',
+      'Can the child skip smoothly with coordination?',
+      'Can the child ride a bicycle with or without training wheels?',
+      'Can the child jump rope or attempt coordinated jumping?',
+      'Can the child throw and catch a small ball accurately?',
     ],
     'FM': [
       'Can the child copy simple shapes like a square?',
+      'Can the child write their own name clearly?',
+      'Can the child draw recognizable pictures with details?',
+      'Can the child cut along a straight or curved line?',
+      'Can the child use proper pencil grip consistently?',
     ],
     'LC': [
       'Can the child speak clearly in full sentences?',
+      'Can the child speak fluently with clear pronunciation?',
+      'Can the child read simple words or short sentences?',
+      'Can the child understand and answer how and why questions?',
+      'Can the child retell a short story in sequence?',
     ],
     'COG': [
       'Can the child recognize letters or numbers?',
+      'Can the child count up to 20 correctly?',
+      'Can the child perform simple addition or subtraction?',
+      'Can the child identify days of the week?',
+      'Can the child categorize objects into groups?',
     ],
     'SE': [
-      'Does the child cooperate with peers and control emotions appropriately?',
+      'Does the child cooperate with peers and control emotions?',
+      'Does the child make and maintain friendships?',
+      'Can the child resolve small conflicts with minimal help?',
+      'Does the child follow school rules consistently?',
+      'Does the child show confidence in completing tasks?',
     ],
   };
 

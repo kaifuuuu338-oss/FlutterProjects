@@ -57,6 +57,23 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
 
   ChildModel? _child;
 
+  void _showError(AppLocalizations l10n, String message) {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentMaterialBanner();
+    messenger.showMaterialBanner(
+      MaterialBanner(
+        content: Text(message),
+        backgroundColor: const Color(0xFFFFF8E1),
+        actions: [
+          TextButton(
+            onPressed: () => messenger.hideCurrentMaterialBanner(),
+            child: Text(l10n.t('close')),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -222,18 +239,18 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
     if (widget.ageMonths >= 12 && widget.ageMonths <= 48) {
       final expected = _autismPositive.length + _autismRedFlags.length;
       if (_autismAnswers.length != expected) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.t('please_answer_all_questions'))));
+        _showError(l10n, 'Please answer all Autism questions.');
         return;
       }
     }
     if (widget.ageMonths >= 24) {
       if (_adhdAnswers.length != _adhdQuestions.length) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.t('please_answer_all_questions'))));
+        _showError(l10n, 'Please answer all ADHD questions.');
         return;
       }
     }
     if (_behaviorAnswers.length != _behaviorQuestions.length) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.t('please_answer_all_questions'))));
+      _showError(l10n, 'Please answer all Behaviour & Emotional questions.');
       return;
     }
 
@@ -241,11 +258,11 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
     final weightText = _weightController.text.trim();
     final heightText = _heightController.text.trim();
     if (weightText.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.t('weight_required'))));
+      _showError(l10n, l10n.t('weight_required'));
       return;
     }
     if (heightText.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.t('height_required'))));
+      _showError(l10n, l10n.t('height_required'));
       return;
     }
 
@@ -257,23 +274,23 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
     final String illnessHistory = _illnessHistoryController.text.trim();
 
     if (weightKg == null || weightKg < 0.5 || weightKg > 60) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.t('enter_valid_number'))));
+      _showError(l10n, 'Enter a valid weight (0.5–60 kg).');
       return;
     }
     if (heightCm == null || heightCm < 30 || heightCm > 200) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.t('enter_valid_number'))));
+      _showError(l10n, 'Enter a valid height/length (30–200 cm).');
       return;
     }
     if (muac != null && (muac < 5 || muac > 30)) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.t('enter_valid_number'))));
+      _showError(l10n, 'Enter a valid MUAC (5–30 cm).');
       return;
     }
     if (hb != null && (hb < 3 || hb > 25)) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.t('enter_valid_number'))));
+      _showError(l10n, 'Enter a valid hemoglobin (3–25 g/dL).');
       return;
     }
     if (birthWeightKg != null && (birthWeightKg < 0.5 || birthWeightKg > 6)) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.t('enter_valid_number'))));
+      _showError(l10n, 'Enter a valid birth weight (0.5–6 kg).');
       return;
     }
 

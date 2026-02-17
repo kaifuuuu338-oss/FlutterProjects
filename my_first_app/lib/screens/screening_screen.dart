@@ -12,6 +12,8 @@ import 'package:my_first_app/services/local_db_service.dart';
 import 'package:my_first_app/services/api_service.dart';
 import 'package:my_first_app/models/screening_model.dart';
 import 'package:my_first_app/widgets/language_menu_button.dart';
+import 'package:my_first_app/core/utils/delay_summary.dart';
+import 'package:my_first_app/core/utils/weighted_scoring_engine.dart';
 
 
 class ScreeningScreen extends StatefulWidget {
@@ -86,15 +88,32 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
 
   Map<String,double> _computeDomainScores() {
     final Map<String,double> scores = {};
+    
     domainResponses.forEach((domain, respMap) {
       if (respMap.isEmpty) {
-        scores[domain] = 1.0; // assume OK when nothing answered (or change as needed)
+        scores[domain] = 0.5; // neutral if no responses
         return;
       }
-      int yes = respMap.values.where((v) => v == 1).length;
-      int total = respMap.length;
-      scores[domain] = total == 0 ? 1.0 : (yes / total);
+      
+      // Convert map responses to list (0=No, 1=Yes) - use directly
+      final responseList = List<int>.filled(respMap.length, 0);
+      respMap.forEach((index, value) {
+        responseList[index] = value; // 0 or 1 directly
+      });
+      
+      // Use weighted scoring engine with exact formula:
+      // S = Σ(aᵢ × wᵢ)
+      // T = 0.5 × Σ(wᵢ)
+      // P = 1 / (1 + e^(-(S-T)))
+      final weightedScore = WeightedScoringEngine.computeDomainScore(
+        domain,
+        responseList,
+        widget.ageMonths,
+      );
+      
+      scores[domain] = weightedScore;
     });
+    
     return scores;
   }
 
@@ -180,11 +199,23 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
     setState(() => submitting = true);
     try {
       final domainScores = _computeDomainScores();
-      var overallRisk = 'low';
+      
+      // Convert weighted scores to risk labels using sigmoidal thresholds
+      final domainRiskLevels = <String, String>{};
+      for (final domain in AppConstants.domains) {
+        final score = domainScores[domain] ?? 0.5;
+        domainRiskLevels[domain] = WeightedScoringEngine.domainScoreToRiskLabel(score);
+      }
+      
+      // Calculate overall risk from domain scores
+      var overallRisk = WeightedScoringEngine.overallRiskFromDomains(domainScores);
       var explainability = '';
-      Map<String, String>? domainRiskLevels;
       var finalDomainScores = Map<String, double>.from(domainScores);
-      Map<String, int> delaySummary = {};
+      final localDelaySummary = buildDelaySummaryFromResponses(
+        domainResponses.map((k, v) => MapEntry(k, v.values.toList())),
+        ageMonths: widget.ageMonths,
+      );
+      Map<String, int> delaySummary = localDelaySummary ?? {};
       final localDb = LocalDBService();
       await localDb.initialize();
       final child = localDb.getChild(widget.childId);
@@ -235,7 +266,8 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
         overallRisk = _normalizeRisk('${response['risk_level'] ?? overallRisk}');
         if (response['domain_scores'] != null) {
           finalDomainScores = _domainRiskToScoreMap(response['domain_scores']);
-          domainRiskLevels = _domainRiskLabelMap(response['domain_scores']);
+          domainRiskLevels.clear();
+          domainRiskLevels.addAll(_domainRiskLabelMap(response['domain_scores']));
         }
         final expRaw = response['explanation'];
         if (expRaw is List) {
@@ -245,7 +277,10 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
         }
         final delayRaw = response['delay_summary'];
         if (delayRaw is Map) {
-          delaySummary = delayRaw.map((k, v) => MapEntry('$k', (v as num).toInt()));
+          final apiSummary = delayRaw.map((k, v) => MapEntry('$k', (v as num).toInt()));
+          for (final entry in apiSummary.entries) {
+            delaySummary.putIfAbsent(entry.key, () => entry.value);
+          }
         }
 
         final riskEnum = RiskLevel.values.firstWhere(
@@ -384,6 +419,10 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
         itemBuilder: (context, index) {
           final s = past[index];
           final risk = s.overallRisk.toString().split('.').last;
+          final delaySummary = buildDelaySummaryFromResponses(
+            s.domainResponses,
+            ageMonths: s.ageMonths,
+          );
           return ListTile(
             title: Text('${s.childId} - ${l10n.t(risk.toLowerCase()).toUpperCase()}'),
             subtitle: Text(l10n.t('date_label', {'date': '${s.screeningDate.toLocal()}'})),
@@ -400,6 +439,7 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
                     childId: s.childId,
                     awwId: s.awwId,
                     ageMonths: s.ageMonths,
+                    delaySummary: delaySummary,
                   ),
                 ),
               );
