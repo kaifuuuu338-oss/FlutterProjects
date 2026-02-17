@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+{% block title %}Problem D Dashboard{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="section-header">
+    <h2>{{ title }}</h2>
+    <span class="tag">Role: {{ role|upper }} {% if location_id %}| {{ location_id }}{% endif %}</span>
+  </div>
+
+  <form class="filter-row" method="get">
+    <label>
+      Role
+      <select name="role">
+        <option value="aww" {% if role == 'aww' %}selected{% endif %}>AWW</option>
+        <option value="supervisor" {% if role == 'supervisor' %}selected{% endif %}>Supervisor</option>
+        <option value="cdpo" {% if role == 'cdpo' %}selected{% endif %}>CDPO / Mandal</option>
+        <option value="district" {% if role == 'district' %}selected{% endif %}>District</option>
+        <option value="state" {% if role == 'state' %}selected{% endif %}>State</option>
+      </select>
+    </label>
+    <label>
+      Location ID
+      <input type="text" name="location_id" value="{{ location_id }}" placeholder="awc/sector/mandal/district id">
+    </label>
+    <button class="btn primary" type="submit">Apply</button>
+  </form>
+
+  <div class="stat-grid">
+    <div class="stat-card"><div><div class="stat-value">{{ improving }}</div><div class="stat-label">Improving</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ worsening }}</div><div class="stat-label">Worsening</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ no_change }}</div><div class="stat-label">No Change</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ avg_delay_reduction }}</div><div class="stat-label">Avg Delay Reduction (months)</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ followup_compliance }}%</div><div class="stat-label">Follow-up Compliance</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ exit_from_high_risk }}</div><div class="stat-label">Exit From High Risk</div></div></div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-header"><h2>Monthly Screening Trend</h2></div>
+  <div class="table-wrap">
+    <table class="kpi-table">
+      <thead><tr><th>Month</th><th>Screenings</th></tr></thead>
+      <tbody>
+        {% for row in trend_rows %}
+          <tr><td>{{ row.month }}</td><td>{{ row.screenings }}</td></tr>
+        {% empty %}
+          <tr><td colspan="2">No trend data yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

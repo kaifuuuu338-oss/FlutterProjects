@@ -1,0 +1,130 @@
+{% extends 'base.html' %}
+{% block title %}Problem C Dashboard{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="section-header">
+    <h2>{{ title }}</h2>
+    <span class="tag">Role: {{ role|upper }} {% if location_id %}| {{ location_id }}{% endif %}</span>
+  </div>
+
+  <form class="filter-row" method="get">
+    <label>
+      Role
+      <select name="role">
+        <option value="aww" {% if role == 'aww' %}selected{% endif %}>AWW</option>
+        <option value="supervisor" {% if role == 'supervisor' %}selected{% endif %}>Supervisor</option>
+        <option value="cdpo" {% if role == 'cdpo' %}selected{% endif %}>CDPO / Mandal</option>
+        <option value="district" {% if role == 'district' %}selected{% endif %}>District</option>
+        <option value="state" {% if role == 'state' %}selected{% endif %}>State</option>
+      </select>
+    </label>
+    <label>
+      Location ID
+      <input type="text" name="location_id" value="{{ location_id }}" placeholder="awc/sector/mandal/district id">
+    </label>
+    <button class="btn primary" type="submit">Apply</button>
+  </form>
+
+  {% if alerts %}
+    <div class="alerts-wrap">
+      {% for a in alerts %}
+        <div class="alert-line">{{ a }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <div class="stat-grid">
+    <div class="stat-card"><div><div class="stat-value">{{ total_children }}</div><div class="stat-label">Total Children</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ total_screened }}</div><div class="stat-label">Screened (latest)</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ screening_coverage }}%</div><div class="stat-label">Screening Coverage</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ pending_referrals }}</div><div class="stat-label">Pending Referrals</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ followup_due }}</div><div class="stat-label">Follow-up Due</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ followup_compliance }}%</div><div class="stat-label">Follow-up Compliance</div></div></div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-header"><h2>Risk Distribution</h2></div>
+  <div class="table-wrap">
+    <table class="kpi-table">
+      <thead><tr><th>Low</th><th>Medium</th><th>High</th><th>Critical</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>{{ risk_distribution.Low|default:0 }}</td>
+          <td>{{ risk_distribution.Medium|default:0 }}</td>
+          <td>{{ risk_distribution.High|default:0 }}</td>
+          <td>{{ risk_distribution.Critical|default:0 }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-header"><h2>Age Band Risk Table</h2></div>
+  <div class="table-wrap">
+    <table class="kpi-table">
+      <thead>
+        <tr>
+          <th>Age Band</th><th>Low</th><th>Medium</th><th>High</th><th>Critical</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in age_band_risk_rows %}
+          <tr>
+            <td>{{ row.age_band }}</td>
+            <td>{{ row.low }}</td>
+            <td>{{ row.medium }}</td>
+            <td>{{ row.high }}</td>
+            <td>{{ row.critical }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-header"><h2>AWC Performance Index</h2></div>
+  <div class="table-wrap">
+    <table class="kpi-table">
+      <thead>
+        <tr>
+          <th>AWC</th><th>Total Children</th><th>Coverage %</th><th>Referral Completion %</th><th>Follow-up Compliance %</th><th>Score</th><th>AWW Trained</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in aww_performance %}
+          <tr>
+            <td>{{ row.awc_id }}</td>
+            <td>{{ row.total_children }}</td>
+            <td>{{ row.screening_coverage }}</td>
+            <td>{{ row.referral_completion_rate }}</td>
+            <td>{{ row.followup_compliance_rate }}</td>
+            <td>{{ row.performance_score }}</td>
+            <td>{% if row.aww_trained %}Yes{% else %}No{% endif %}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="7">No performance data yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-header"><h2>Hotspot Mandals</h2></div>
+  <div class="table-wrap">
+    <table class="kpi-table">
+      <thead><tr><th>Mandal</th><th>High/Critical %</th></tr></thead>
+      <tbody>
+        {% for h in hotspots %}
+          <tr><td>{{ h.mandal_id }}</td><td>{{ h.high_risk_pct }}</td></tr>
+        {% empty %}
+          <tr><td colspan="2">No hotspot detected above 15% threshold.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
