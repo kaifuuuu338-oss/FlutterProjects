@@ -14,6 +14,8 @@ import 'package:my_first_app/models/screening_model.dart';
 import 'package:my_first_app/widgets/language_menu_button.dart';
 import 'package:my_first_app/core/utils/delay_summary.dart';
 import 'package:my_first_app/core/utils/weighted_scoring_engine.dart';
+import 'package:my_first_app/services/tts_service.dart';
+import 'package:provider/provider.dart';
 
 
 class ScreeningScreen extends StatefulWidget {
@@ -68,6 +70,7 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
           languageCode: locale.languageCode,
         );
       });
+      context.read<TtsService>().syncLocale(locale);
     }
   }
 
@@ -120,6 +123,7 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
   Future<void> _saveDomainDraft(String domain) async {
     final domainScores = _computeDomainScores();
     final l10n = AppLocalizations.of(context);
+    final tts = context.watch<TtsService>();
     final localDb = LocalDBService();
     await localDb.initialize();
 
@@ -189,6 +193,7 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
 
   void _onSubmit() async {
     final l10n = AppLocalizations.of(context);
+    final tts = context.watch<TtsService>();
     if (!_allQuestionsAnswered()) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(l10n.t('please_answer_all_questions'))),
@@ -346,6 +351,7 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
     final count = _localDb.getAllChildren().length;
     if (!mounted) return;
     final l10n = AppLocalizations.of(context);
+    final tts = context.watch<TtsService>();
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -373,6 +379,7 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
 
     if (!mounted) return;
     final l10n = AppLocalizations.of(context);
+    final tts = context.watch<TtsService>();
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -405,6 +412,7 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
 
     if (!mounted) return;
     final l10n = AppLocalizations.of(context);
+    final tts = context.watch<TtsService>();
     if (past.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(l10n.t('no_past_results'))),
@@ -475,6 +483,7 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
 
   Widget _buildNavDrawer() {
     final l10n = AppLocalizations.of(context);
+    final tts = context.watch<TtsService>();
     return Drawer(
       child: SafeArea(
         child: ListView(
@@ -496,6 +505,7 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final tts = context.watch<TtsService>();
     final totalQuestions = _displayQuestions.values.fold<int>(0, (a, b) => a + b.length);
     final answeredQuestions = domainResponses.values.fold<int>(0, (a, b) => a + b.length);
     final progress = totalQuestions == 0 ? 0.0 : answeredQuestions / totalQuestions;
@@ -568,6 +578,46 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
       ),
     );
 
+    final ttsBar = Container(
+      margin: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE3ECF5)),
+      ),
+      child: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 8,
+        runSpacing: 6,
+        children: [
+          const Icon(Icons.record_voice_over, size: 18, color: Color(0xFF2A6EBB)),
+          const Text('Voice', style: TextStyle(fontWeight: FontWeight.w600)),
+          DropdownButton<String>(
+            value: tts.languageCode,
+            onChanged: (v) {
+              if (v != null) tts.setLanguageCode(v);
+            },
+            items: const [
+              DropdownMenuItem(value: 'en-IN', child: Text('English')),
+              DropdownMenuItem(value: 'te-IN', child: Text('Telugu')),
+              DropdownMenuItem(value: 'hi-IN', child: Text('Hindi')),
+            ],
+          ),
+          IconButton(
+            icon: const Icon(Icons.pause_circle, color: Color(0xFF6A7580)),
+            onPressed: tts.isSpeaking ? tts.pause : null,
+            tooltip: 'Pause',
+          ),
+          IconButton(
+            icon: const Icon(Icons.stop_circle, color: Color(0xFFE14B49)),
+            onPressed: tts.isSpeaking ? tts.stop : null,
+            tooltip: 'Stop',
+          ),
+        ],
+      ),
+    );
+
     final domainsList = ListView(
       children: AppConstants.domains.map((d) {
         final questions = _displayQuestions[d] ?? [];
@@ -578,6 +628,7 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
           responses: domainResponses[d] ?? {},
           onChanged: (map) => _onDomainChanged(d, map),
           onSave: () => _saveDomainDraft(d),
+          onSpeakQuestion: (q) => tts.speak(q),
           saveLabel: l10n.t('save_topic'),
           yesLabel: l10n.t('yes'),
           noLabel: l10n.t('no'),
@@ -605,6 +656,7 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
         body: Column(
           children: [
             headerCard,
+            ttsBar,
             Expanded(child: domainsList),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
@@ -683,6 +735,7 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
                     child: Column(
                       children: [
                         headerCard,
+                        ttsBar,
                         Expanded(child: domainsList),
                         Padding(
                           padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),

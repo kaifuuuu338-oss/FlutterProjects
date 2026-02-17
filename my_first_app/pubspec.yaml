@@ -46,6 +46,7 @@ dependencies:
   # Animations
   loading_animation_widget: ^1.2.0
   translator: ^1.0.3+1
+  flutter_tts: ^4.0.2
 
 dev_dependencies:
   flutter_test:

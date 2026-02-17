@@ -1,0 +1,116 @@
+{% extends 'base.html' %}
+{% block title %}ECD Dashboard{% endblock %}
+{% block content %}
+<section class="hero">
+  <div class="hero-copy">
+    <div class="eyebrow">Anganwadi ECD Screening</div>
+    <h1>Anganwadi Early Childhood Identification App</h1>
+    <p class="hero-subtitle">
+      A web dashboard that mirrors the Anganwadi app workflow: register, screen, review risks, and generate referrals.
+    </p>
+    <div class="hero-actions">
+      <a class="btn primary" href="/screening/">Start Screening</a>
+      <a class="btn ghost" href="/results/">View Results</a>
+    </div>
+  </div>
+  <div class="hero-panel">
+    <div class="panel-title">Workflow Snapshot</div>
+    <div class="panel-steps">
+      <div class="step">
+        <div class="step-dot"></div>
+        <div>
+          <div class="step-title">Register Child</div>
+          <div class="step-sub">Capture basic child & caregiver details.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-dot"></div>
+        <div>
+          <div class="step-title">Baseline Screening</div>
+          <div class="step-sub">GM, FM, LC, COG, SE with weighted scoring.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-dot"></div>
+        <div>
+          <div class="step-title">Behavioural & Psychosocial</div>
+          <div class="step-sub">Autism, ADHD, behaviour risk checks.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-dot"></div>
+        <div>
+          <div class="step-title">Results & Referral</div>
+          <div class="step-sub">Risk levels, explainability, referral flow.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-header">
+    <h2>Operational Snapshot</h2>
+    <span class="tag">Live Sync Ready</span>
+  </div>
+  <div class="stat-grid">
+    <div class="stat-card">
+      <div class="stat-icon accent-green">CH</div>
+      <div>
+        <div class="stat-value">—</div>
+        <div class="stat-label">Registered Children</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon accent-blue">RS</div>
+      <div>
+        <div class="stat-value">—</div>
+        <div class="stat-label">Recent Screenings</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon accent-amber">HR</div>
+      <div>
+        <div class="stat-value">—</div>
+        <div class="stat-label">High Risk Alerts</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon accent-rose">PS</div>
+      <div>
+        <div class="stat-value">—</div>
+        <div class="stat-label">Pending Sync</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-header">
+    <h2>Core Actions</h2>
+    <span class="tag subtle">App Features</span>
+  </div>
+  <div class="action-grid">
+    <a class="action-card" href="/screening/">
+      <div class="action-icon">SC</div>
+      <div class="action-title">Start Screening</div>
+      <div class="action-sub">Baseline milestones across 5 domains.</div>
+    </a>
+    <a class="action-card" href="/results/">
+      <div class="action-icon">RS</div>
+      <div class="action-title">View Results</div>
+      <div class="action-sub">Risk levels, delay summary, explainability.</div>
+    </a>
+    <div class="action-card is-disabled">
+      <div class="action-icon">BP</div>
+      <div class="action-title">Behavioural & Psychosocial</div>
+      <div class="action-sub">Autism, ADHD, behaviour assessment.</div>
+    </div>
+    <div class="action-card is-disabled">
+      <div class="action-icon">RF</div>
+      <div class="action-title">Referral Summary</div>
+      <div class="action-sub">Auto‑recommend referrals & follow‑ups.</div>
+    </div>
+  </div>
+</section>
+{% endblock %}

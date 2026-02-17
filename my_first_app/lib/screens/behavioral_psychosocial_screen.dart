@@ -1,4 +1,3 @@
-﻿import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -59,43 +58,6 @@ class _RiskCalc {
     required this.p2,
     required this.normalizedRisk,
   });
-}
-
-class _HealthRange {
-  final double minWeight;
-  final double maxWeight;
-  final double minHeight;
-  final double maxHeight;
-  final double minMuac;
-  final double maxMuac;
-  final double minHb;
-  final double maxHb;
-  final double minBirthWeight;
-
-  const _HealthRange({
-    required this.minWeight,
-    required this.maxWeight,
-    required this.minHeight,
-    required this.maxHeight,
-    required this.minMuac,
-    required this.maxMuac,
-    required this.minHb,
-    required this.maxHb,
-    required this.minBirthWeight,
-  });
-}
-
-class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScreen> {
-  final LocalDBService _localDb = LocalDBService();
-  final APIService _api = APIService();
-
-  final Map<int, int> _autismAnswers = {};
-  final Map<int, int> _adhdAnswers = {};
-  final Map<int, int> _behaviorAnswers = {};
-  final TextEditingController _weightController = TextEditingController();
-  final TextEditingController _heightController = TextEditingController();
-  final TextEditingController _muacController = TextEditingController();
-  final TextEditingController _birthWeightController = TextEditingController();
   final TextEditingController _hemoglobinController = TextEditingController();
   String _recentIllness = 'No';
 
@@ -111,6 +73,48 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
     _loadChild();
   }
 
+=======
+  final TextEditingController _illnessHistoryController = TextEditingController();
+  String? _immunizationStatus;
+  bool _submitting = false;
+
+  ChildModel? _child;
+  Locale? _currentLocale;
+
+  void _showError(AppLocalizations l10n, String message) {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentMaterialBanner();
+    messenger.showMaterialBanner(
+      MaterialBanner(
+        content: Text(message),
+        backgroundColor: const Color(0xFFFFF8E1),
+        actions: [
+          TextButton(
+            onPressed: () => messenger.hideCurrentMaterialBanner(),
+            child: Text(l10n.t('close')),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadChild();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final locale = Localizations.localeOf(context);
+    if (_currentLocale?.languageCode != locale.languageCode) {
+      _currentLocale = locale;
+      context.read<TtsService>().syncLocale(locale);
+    }
+  }
+
+>>>>>>> 56d4ce1c2f98a780ed5a24814e5b978350f810dd
   Future<void> _loadChild() async {
     await _localDb.initialize();
     final c = _localDb.getChild(widget.childId);
@@ -131,7 +135,6 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
   _HealthRange _healthRangeForAge(int ageMonths) {
     if (ageMonths <= 3) {
       return const _HealthRange(
-        minWeight: 5.0,
         maxWeight: 6.0,
         minHeight: 57,
         maxHeight: 61,
@@ -147,48 +150,6 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
         minWeight: 6.0,
         maxWeight: 7.5,
         minHeight: 61,
-        maxHeight: 66,
-        minMuac: 13.5,
-        maxMuac: 14.5,
-        minHb: 11,
-        maxHb: 14,
-        minBirthWeight: 2.5,
-      );
-    }
-    if (ageMonths <= 9) {
-      return const _HealthRange(
-        minWeight: 7.0,
-        maxWeight: 8.5,
-        minHeight: 66,
-        maxHeight: 71,
-        minMuac: 14.0,
-        maxMuac: 15.0,
-        minHb: 11,
-        maxHb: 13,
-        minBirthWeight: 2.5,
-      );
-    }
-    if (ageMonths <= 12) {
-      return const _HealthRange(
-        minWeight: 8.0,
-        maxWeight: 9.5,
-        minHeight: 70,
-        maxHeight: 75,
-        minMuac: 14.5,
-        maxMuac: 15.5,
-        minHb: 11,
-        maxHb: 13,
-        minBirthWeight: 2.5,
-      );
-    }
-    if (ageMonths <= 18) {
-      return const _HealthRange(
-        minWeight: 9.0,
-        maxWeight: 11.0,
-        minHeight: 75,
-        maxHeight: 82,
-        minMuac: 15.0,
-        maxMuac: 16.0,
         minHb: 11,
         maxHb: 13,
         minBirthWeight: 2.5,
@@ -428,7 +389,6 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
           't2': adhdCalc.t2,
           'p1': adhdCalc.p1,
           'p2': adhdCalc.p2,
-        },
         'behavior': {
           'score': behaviorCalc.weightedScore,
           'max': behaviorCalc.maxScore,
@@ -445,28 +405,6 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
           'birth_weight_kg': birthWeight,
           'hemoglobin_g_dl': hb,
           'recent_illness': _recentIllness,
-          'expected_range': {
-            'weight': '${range.minWeight}-${range.maxWeight}',
-            'height': '${range.minHeight}-${range.maxHeight}',
-            'muac': '${range.minMuac}-${range.maxMuac}',
-            'hemoglobin': '${range.minHb}-${range.maxHb}',
-            'birth_weight_min': '${range.minBirthWeight}',
-          }
-        }
-      }),
-      missedMilestones: 0,
-      delayMonths: 0,
-      consentGiven: true,
-      consentTimestamp: DateTime.now(),
-      referralTriggered: false,
-      screeningDate: DateTime.now(),
-      submittedAt: null,
-    );
-
-    await _localDb.saveScreening(screening);
-
-    final payload = {
-      'child_id': widget.childId,
       'assessment_type': 'behavioural_psychosocial',
       'age_months': widget.ageMonths,
       'domain_responses': screening.domainResponses,

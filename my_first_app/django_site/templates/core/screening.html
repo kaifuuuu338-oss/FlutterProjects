@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+{% block title %}New Screening{% endblock %}
+{% block content %}
+<section class="section form-shell">
+  <div class="section-header">
+    <h2>Baseline Screening</h2>
+    <span class="tag">Step 1 of 3</span>
+  </div>
+  <div class="form-card">
+    <div class="form-intro">
+      Capture baseline milestones for the child. Use the mobile app workflow as reference.
+    </div>
+    <form method="post" class="form-grid">
+      {% csrf_token %}
+      <div class="form-field">
+        <label for="child_name">Child name</label>
+        <input type="text" id="child_name" name="child_name" placeholder="e.g., Aarav" required />
+      </div>
+      <div class="form-field">
+        <label for="age_months">Age (months)</label>
+        <input type="number" id="age_months" name="age_months" placeholder="e.g., 18" required />
+      </div>
+      <div class="form-field full">
+        <button type="submit" class="btn primary">Submit Screening</button>
+      </div>
+    </form>
+  </div>
+</section>
+{% endblock %}

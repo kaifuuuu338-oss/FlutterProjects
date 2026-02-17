@@ -6,6 +6,7 @@ class QuestionCard extends StatelessWidget {
   final ValueChanged<int> onChanged;
   final String yesLabel;
   final String noLabel;
+  final VoidCallback? onSpeak;
 
   const QuestionCard({
     super.key,
@@ -14,6 +15,7 @@ class QuestionCard extends StatelessWidget {
     required this.onChanged,
     this.yesLabel = 'Yes',
     this.noLabel = 'No',
+    this.onSpeak,
   });
 
   @override
@@ -38,7 +40,13 @@ class QuestionCard extends StatelessWidget {
                   ),
             ),
           ),
-          const SizedBox(width: 8),
+          if (onSpeak != null)
+            IconButton(
+              icon: const Icon(Icons.volume_up, size: 20),
+              onPressed: onSpeak,
+              tooltip: 'Listen',
+            ),
+          const SizedBox(width: 6),
           Container(
             padding: const EdgeInsets.all(2),
             decoration: BoxDecoration(
