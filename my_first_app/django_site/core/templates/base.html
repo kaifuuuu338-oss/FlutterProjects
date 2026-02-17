@@ -1,0 +1,41 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}AI ECD Screening{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/styles.css' %}">
+</head>
+<body>
+    <header class="topbar">
+        <div class="page">
+            <div class="brand">
+                <div class="brand-mark">ECD</div>
+                <div class="brand-text">
+                    <div class="brand-title">AI ECD Screening</div>
+                    <div class="brand-subtitle">Early Identification Dashboard</div>
+                </div>
+            </div>
+            <nav class="nav-links">
+                <a href="/" class="nav-link">Dashboard</a>
+                <a href="/screening/" class="nav-link">Screening</a>
+                <a href="/results/" class="nav-link">Results</a>
+                {% if user.is_authenticated %}
+                    <span class="nav-pill">Hi, {{ user.username }}</span>
+                    <a href="{% url 'core:logout' %}" class="nav-link">Logout</a>
+                {% else %}
+                    <a href="{% url 'core:login' %}" class="nav-link">Login</a>
+                    <a href="{% url 'core:register' %}" class="nav-link">Register</a>
+                {% endif %}
+            </nav>
+        </div>
+    </header>
+    <main class="page">
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

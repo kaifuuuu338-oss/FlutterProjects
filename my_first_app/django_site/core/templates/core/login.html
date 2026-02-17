@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% block title %}Login{% endblock %}
+{% block content %}
+<section class="section form-shell">
+  <div class="section-header">
+    <h2>Sign In</h2>
+    <span class="tag">AWW Access</span>
+  </div>
+  <div class="form-card">
+    {% if form.errors %}
+      {% with err_count=form.errors|length %}
+        <div class="alert">Please correct the error{% if err_count > 1 %}s{% endif %} below.</div>
+      {% endwith %}
+    {% endif %}
+    <form method="post" novalidate class="form-grid">
+      {% csrf_token %}
+      <div class="form-field">
+        {{ form.username.label_tag }}
+        {{ form.username }}
+        {% for error in form.username.errors %}
+          <div class="field-error">{{ error }}</div>
+        {% endfor %}
+      </div>
+      <div class="form-field">
+        {{ form.password.label_tag }}
+        {{ form.password }}
+        {% for error in form.password.errors %}
+          <div class="field-error">{{ error }}</div>
+        {% endfor %}
+      </div>
+      <div class="form-field full">
+        <button type="submit" class="btn primary">Login</button>
+      </div>
+    </form>
+    <div class="form-footer">
+      <span>Don't have an account?</span>
+      <a href="{% url 'core:register' %}">Register</a>
+    </div>
+  </div>
+</section>
+{% endblock %}

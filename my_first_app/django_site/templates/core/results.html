@@ -1,12 +1,26 @@
-<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>Results</title>
-  </head>
-  <body>
-    <h1>Screening Results (placeholder)</h1>
-    <p>Results will be shown here after submitting the screening to the FastAPI backend.</p>
-    <a href="/">Back</a>
-  </body>
-</html>
+{% extends 'base.html' %}
+{% block title %}Screening Results{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="section-header">
+    <h2>Screening Results</h2>
+    <span class="tag subtle">Summary</span>
+  </div>
+  <div class="results-grid">
+    <div class="results-card">
+      <div class="results-title">Overall Risk</div>
+      <div class="results-value">Pending</div>
+      <div class="results-sub">Submit a screening to populate results.</div>
+    </div>
+    <div class="results-card">
+      <div class="results-title">Domain Highlights</div>
+      <div class="results-sub">GM · FM · LC · COG · SE</div>
+      <div class="results-meta">Weighted scoring and sigmoid thresholding applied.</div>
+    </div>
+  </div>
+  <div class="results-actions">
+    <a href="/screening/" class="btn primary">Start New Screening</a>
+    <a href="/" class="btn ghost">Back to Dashboard</a>
+  </div>
+</section>
+{% endblock %}
