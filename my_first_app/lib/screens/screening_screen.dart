@@ -302,13 +302,12 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
         // mark as submitted
         await localDb.saveScreening(updated);
       } catch (e) {
-        setState(() => submitting = false);
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(AppLocalizations.of(context).t('screening_saved_not_synced'))),
-        );
-        Navigator.of(context).pop();
-        return;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(AppLocalizations.of(context).t('screening_saved_not_synced'))),
+          );
+        }
+        // Continue to next step with local results even if API is unreachable.
       }
 
       setState(() => submitting = false);
