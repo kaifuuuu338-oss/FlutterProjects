@@ -187,4 +187,69 @@ class APIService {
     }
   }
 
+  Future<Map<String, dynamic>> generateProblemBActivities(Map<String, dynamic> payload) async {
+    try {
+      final response = await _dio.post('/problem-b/activities/generate', data: payload);
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw Exception('Problem B activity generation failed: ${e.message}');
+    }
+  }
+
+  Future<Map<String, dynamic>> getProblemBActivities(String childId) async {
+    try {
+      final response = await _dio.get('/problem-b/activities/$childId');
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw Exception('Problem B activities fetch failed: ${e.message}');
+    }
+  }
+
+  Future<Map<String, dynamic>> markProblemBActivityStatus({
+    required String childId,
+    required String activityId,
+    required String status,
+  }) async {
+    try {
+      final response = await _dio.post(
+        '/problem-b/activities/mark-status',
+        data: {
+          'child_id': childId,
+          'activity_id': activityId,
+          'status': status,
+        },
+      );
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw Exception('Problem B activity status update failed: ${e.message}');
+    }
+  }
+
+  Future<Map<String, dynamic>> getProblemBCompliance(String childId) async {
+    try {
+      final response = await _dio.get('/problem-b/compliance/$childId');
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw Exception('Problem B compliance fetch failed: ${e.message}');
+    }
+  }
+
+  Future<Map<String, dynamic>> resetProblemBFrequency({
+    required String childId,
+    required String frequencyType,
+  }) async {
+    try {
+      final response = await _dio.post(
+        '/problem-b/activities/reset-frequency',
+        data: {
+          'child_id': childId,
+          'frequency_type': frequencyType,
+        },
+      );
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw Exception('Problem B frequency reset failed: ${e.message}');
+    }
+  }
+
 }

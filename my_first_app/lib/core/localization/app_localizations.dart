@@ -51,8 +51,9 @@ class AppLocalizations {
       groupKey = 'q0_12';
     } else {
       final years = ageMonths ~/ 12;
-      if (years <= 2) groupKey = 'q12_24';
-      else if (years == 3) groupKey = 'q24_36';
+      if (years <= 2) {
+        groupKey = 'q12_24';
+      } else if (years == 3) groupKey = 'q24_36';
       else if (years == 4) groupKey = 'q36_48';
       else if (years == 5) groupKey = 'q48_60';
       else groupKey = 'q60_72';

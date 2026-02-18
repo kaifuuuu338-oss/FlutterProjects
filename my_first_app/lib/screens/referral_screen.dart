@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:my_first_app/core/constants/app_constants.dart';
 import 'package:my_first_app/core/localization/app_localizations.dart';
 import 'package:my_first_app/models/child_model.dart';
 import 'package:my_first_app/models/referral_model.dart';

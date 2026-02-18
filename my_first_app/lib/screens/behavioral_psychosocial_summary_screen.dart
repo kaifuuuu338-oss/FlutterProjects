@@ -236,7 +236,7 @@ class BehavioralPsychosocialSummaryScreen extends StatelessWidget {
                 Expanded(
                   child: Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
                 ),
-                if (trailing case final t?) t,
+                ?trailing,
               ],
             ),
             const SizedBox(height: 10),
