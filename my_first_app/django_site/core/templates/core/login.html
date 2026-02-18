@@ -4,7 +4,7 @@
 <section class="section form-shell">
   <div class="section-header">
     <h2>Sign In</h2>
-    <span class="tag">AWW Access</span>
+    <span class="tag">Government Access</span>
   </div>
   <div class="form-card">
     {% if form.errors %}
@@ -25,6 +25,13 @@
         {{ form.password.label_tag }}
         {{ form.password }}
         {% for error in form.password.errors %}
+          <div class="field-error">{{ error }}</div>
+        {% endfor %}
+      </div>
+      <div class="form-field">
+        {{ form.role.label_tag }}
+        {{ form.role }}
+        {% for error in form.role.errors %}
           <div class="field-error">{{ error }}</div>
         {% endfor %}
       </div>

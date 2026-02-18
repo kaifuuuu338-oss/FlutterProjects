@@ -236,7 +236,10 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
       'gender': child?.gender ?? 'M',
       'mandal': child?.mandal ?? 'Demo Mandal',
       'district': child?.district ?? 'Demo District',
-      'aws_code': child?.awcCode ?? 'AWS_DEMO_001',
+      // Backend expects awc_id for Problem C role-wise filtering.
+      'awc_id': child?.awcCode ?? 'AWC001',
+      // Keep an explicit empty/default sector id until sector mapping is captured.
+      'sector_id': '',
       'domain_responses': domainResponses.map((k,v) => MapEntry(k, v.values.toList())),
       'domain_scores': domainScores,
       'overall_risk': overallRisk,

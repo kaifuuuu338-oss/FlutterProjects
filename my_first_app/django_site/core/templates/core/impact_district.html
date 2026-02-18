@@ -1,0 +1,49 @@
+{% extends 'base.html' %}
+{% block title %}Problem D - District{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="section-header"><h2>{{ title }}</h2><span class="tag">Role: District</span></div>
+  <form class="filter-row" method="get">
+    <label>District ID<input type="text" name="location_id" value="{{ location_id }}" placeholder="DISTRICT001"></label>
+    <button class="btn primary" type="submit">Apply</button>
+  </form>
+  <div class="stat-grid">
+    <div class="stat-card"><div><div class="stat-value">{{ improving_pct }}%</div><div class="stat-label">Mandal Improvement %</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ exit_from_high_risk }}</div><div class="stat-label">Reduction in Critical Cases</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ chronic_cases }}</div><div class="stat-label">Chronic Risk Cases</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ avg_improvement_days }}</div><div class="stat-label">Avg Time to Improvement (days)</div></div></div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-header"><h2>Mandal Ranking</h2></div>
+  <div class="table-wrap">
+    <table class="kpi-table">
+      <thead><tr><th>Mandal</th><th>Improvement %</th><th>Risk Reduction %</th><th>Referral Efficiency</th></tr></thead>
+      <tbody>
+      {% for row in mandal_rows %}
+        <tr><td>{{ row.mandal_id }}</td><td>{{ row.improving_pct }}%</td><td>{{ row.risk_reduction_pct }}%</td><td>{{ row.referral_efficiency }}%</td></tr>
+      {% empty %}
+        <tr><td colspan="4">No mandal data.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-header"><h2>District Longitudinal Trend</h2></div>
+  <div class="table-wrap">
+    <table class="kpi-table">
+      <thead><tr><th>Month</th><th>High Risk %</th><th>Screenings</th></tr></thead>
+      <tbody>
+      {% for row in trend_rows %}
+        <tr><td>{{ row.month }}</td><td>{{ row.high_risk_pct }}%</td><td>{{ row.screenings }}</td></tr>
+      {% empty %}
+        <tr><td colspan="3">No trend data.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

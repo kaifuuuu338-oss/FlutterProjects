@@ -4,7 +4,7 @@
 <section class="section form-shell">
   <div class="section-header">
     <h2>Create Account</h2>
-    <span class="tag">AWW Onboarding</span>
+    <span class="tag">Government Onboarding</span>
   </div>
   <div class="form-card">
     {% if form.errors %}
@@ -25,6 +25,21 @@
         {{ form.email.label_tag }}
         {{ form.email }}
         {% for error in form.email.errors %}
+          <div class="field-error">{{ error }}</div>
+        {% endfor %}
+      </div>
+      <div class="form-field">
+        {{ form.role.label_tag }}
+        {{ form.role }}
+        {% for error in form.role.errors %}
+          <div class="field-error">{{ error }}</div>
+        {% endfor %}
+      </div>
+      <div class="form-field">
+        {{ form.location_id.label_tag }}
+        {{ form.location_id }}
+        {% if form.location_id.help_text %}<div class="results-meta">{{ form.location_id.help_text }}</div>{% endif %}
+        {% for error in form.location_id.errors %}
           <div class="field-error">{{ error }}</div>
         {% endfor %}
       </div>

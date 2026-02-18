@@ -1,0 +1,42 @@
+{% extends 'base.html' %}
+{% block title %}Problem D - State{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="section-header"><h2>{{ title }}</h2><span class="tag">Role: State</span></div>
+  <div class="stat-grid">
+    <div class="stat-card"><div><div class="stat-value">{{ district_rows|length }}</div><div class="stat-label">Districts Improving</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ worsening }}</div><div class="stat-label">Districts Declining (proxy)</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ avg_delay_reduction }}%</div><div class="stat-label">Overall Risk Reduction %</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ followup_compliance }}%</div><div class="stat-label">Intervention Success Rate</div></div></div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-header"><h2>District Comparison Map (Table View)</h2></div>
+  <div class="table-wrap">
+    <table class="kpi-table">
+      <thead><tr><th>District</th><th>Improvement %</th><th>Worsening %</th><th>Status</th></tr></thead>
+      <tbody>
+      {% for row in district_rows %}
+        <tr>
+          <td>{{ row.district_id }}</td>
+          <td>{{ row.improving_pct }}%</td>
+          <td>{{ row.worsening_pct }}%</td>
+          <td>{% if row.status_color == 'Green' %}<span class="risk-badge risk-low">Green</span>{% elif row.status_color == 'Yellow' %}<span class="risk-badge risk-medium">Yellow</span>{% else %}<span class="risk-badge risk-high">Red</span>{% endif %}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="4">No district comparison data.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-header"><h2>Policy Insight Report</h2></div>
+  <div class="results-card">
+    <div class="results-title">AI Insight</div>
+    <div class="results-sub">{{ policy_insight }}</div>
+  </div>
+</section>
+{% endblock %}

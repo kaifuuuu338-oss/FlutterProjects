@@ -189,12 +189,12 @@ def _save_screening(db_path: str, payload: ScreeningRequest, result: ScreeningRe
             INSERT INTO child_profile(child_id, gender, age_months, awc_id, sector_id, mandal_id, district_id, created_at)
             VALUES(?,?,?,?,?,?,?,?)
             ON CONFLICT(child_id) DO UPDATE SET
-              gender=excluded.gender,
+              gender=COALESCE(NULLIF(excluded.gender, ''), child_profile.gender),
               age_months=excluded.age_months,
-              awc_id=excluded.awc_id,
-              sector_id=excluded.sector_id,
-              mandal_id=excluded.mandal_id,
-              district_id=excluded.district_id
+              awc_id=COALESCE(NULLIF(excluded.awc_id, ''), child_profile.awc_id),
+              sector_id=COALESCE(NULLIF(excluded.sector_id, ''), child_profile.sector_id),
+              mandal_id=COALESCE(NULLIF(excluded.mandal_id, ''), child_profile.mandal_id),
+              district_id=COALESCE(NULLIF(excluded.district_id, ''), child_profile.district_id)
             """,
             (
                 payload.child_id,
@@ -284,6 +284,9 @@ def _compute_monitoring(db_path: str, role: str, location_id: str) -> dict:
                 f"SELECT * FROM screening_domain_score WHERE screening_id IN ({placeholders})",
                 tuple(latest_ids),
             ).fetchall()
+        domain_rows_by_screen: Dict[int, List[sqlite3.Row]] = {}
+        for row in domain_rows:
+            domain_rows_by_screen.setdefault(int(row["screening_id"]), []).append(row)
 
         risk_distribution = Counter({"Low": 0, "Medium": 0, "High": 0, "Critical": 0})
         age_band_rows = {k: {"age_band": k, "low": 0, "medium": 0, "high": 0, "critical": 0} for k in ["0-12", "13-24", "25-36", "37-48", "49-60", "61-72"]}
@@ -302,11 +305,25 @@ def _compute_monitoring(db_path: str, role: str, location_id: str) -> dict:
         referrals = [r for r in referrals if r["child_id"] in child_map]
         pending_referrals = sum(1 for r in referrals if int(r["referral_required"] or 0) == 1 and (r["referral_status"] or "") == "Pending")
         completed_referrals = sum(1 for r in referrals if (r["referral_status"] or "") == "Completed")
+        under_treatment_referrals = sum(1 for r in referrals if (r["referral_status"] or "") == "Under Treatment")
 
         followups = conn.execute("SELECT * FROM followup_outcome").fetchall()
         followups = [f for f in followups if f["child_id"] in child_map]
         followup_due = sum(1 for f in followups if int(f["followup_completed"] or 0) == 0)
         followup_done = sum(1 for f in followups if int(f["followup_completed"] or 0) == 1)
+        followup_improving = sum(1 for f in followups if (f["improvement_status"] or "") == "Improving")
+        followup_worsening = sum(1 for f in followups if (f["improvement_status"] or "") == "Worsening")
+        followup_same = sum(1 for f in followups if (f["improvement_status"] or "") == "No Change")
+
+        # Active intervention proxy:
+        # child has unfinished follow-up OR referral under treatment/pending.
+        intervention_active_ids = set(
+            f["child_id"] for f in followups if int(f["followup_completed"] or 0) == 0
+        )
+        intervention_active_ids.update(
+            r["child_id"] for r in referrals if (r["referral_status"] or "") in {"Pending", "Under Treatment"}
+        )
+        intervention_active_children = len(intervention_active_ids)
 
         today = datetime.utcnow().date()
         overdue_referrals = []
@@ -324,12 +341,59 @@ def _compute_monitoring(db_path: str, role: str, location_id: str) -> dict:
                     }
                 )
 
+        latest_referral_by_child: Dict[str, sqlite3.Row] = {}
+        for r in sorted(referrals, key=lambda x: (x["referral_date"] or "", x["referral_id"] or ""), reverse=True):
+            if r["child_id"] not in latest_referral_by_child:
+                latest_referral_by_child[r["child_id"]] = r
+        latest_followup_by_child: Dict[str, sqlite3.Row] = {}
+        for f in sorted(followups, key=lambda x: (x["followup_date"] or "", x["id"] or 0), reverse=True):
+            if f["child_id"] not in latest_followup_by_child:
+                latest_followup_by_child[f["child_id"]] = f
+
+        high_risk_children = []
         priority_children = []
         for cid, s in latest_screen_by_child.items():
             risk = _normalize_risk(s["overall_risk"])
-            if risk not in {"High", "Critical"}:
-                continue
             c = child_map[cid]
+            referral = latest_referral_by_child.get(cid)
+            followup = latest_followup_by_child.get(cid)
+            days_since_flagged = 0
+            s_date = _parse_date_safe(s["created_at"])
+            if s_date:
+                days_since_flagged = max((today - s_date).days, 0)
+
+            if risk in {"High", "Critical"}:
+                affected_domains = []
+                for d in domain_rows_by_screen.get(int(s["id"]), []):
+                    if _normalize_risk(d["risk_label"]) in {"High", "Critical"}:
+                        affected_domains.append(d["domain"])
+                high_risk_children.append(
+                    {
+                        "child_id": cid,
+                        "child_name": cid,
+                        "age_months": s["age_months"],
+                        "risk_category": risk,
+                        "domain_affected": ", ".join(affected_domains) if affected_domains else "General",
+                        "referral_status": (referral["referral_status"] if referral else "Pending"),
+                        "days_since_flagged": days_since_flagged,
+                    }
+                )
+
+            referral_status = (referral["referral_status"] if referral else "Pending")
+            followup_completed = int(followup["followup_completed"] or 0) == 1 if followup else False
+            improvement_status = (followup["improvement_status"] if followup else "No Change")
+            if risk == "Critical":
+                rank = 1
+            elif risk == "High" and referral_status == "Pending":
+                rank = 2
+            elif risk == "High" and not followup_completed:
+                rank = 3
+            elif risk == "Medium" and improvement_status == "Worsening":
+                rank = 4
+            else:
+                rank = 9
+            if rank == 9:
+                continue
             priority_children.append(
                 {
                     "child_id": cid,
@@ -338,9 +402,11 @@ def _compute_monitoring(db_path: str, role: str, location_id: str) -> dict:
                     "awc_id": c.get("awc_id", ""),
                     "mandal_id": c.get("mandal_id", ""),
                     "district_id": c.get("district_id", ""),
+                    "rank": rank,
                 }
             )
-        priority_children.sort(key=lambda x: _risk_rank(x["risk"]), reverse=True)
+        priority_children.sort(key=lambda x: (x["rank"], -_risk_rank(x["risk"])))
+        high_risk_children.sort(key=lambda x: (_risk_rank(x["risk_category"]), x["days_since_flagged"]), reverse=True)
 
         mandal_counts = Counter()
         mandal_high = Counter()
@@ -432,6 +498,17 @@ def _compute_monitoring(db_path: str, role: str, location_id: str) -> dict:
     coverage = round((total_screened * 100 / total_children), 2) if total_children else 0.0
     referral_completion = round((completed_referrals * 100 / (completed_referrals + pending_referrals)), 2) if (completed_referrals + pending_referrals) else 0.0
     followup_compliance = round((followup_done * 100 / (followup_done + followup_due)), 2) if (followup_done + followup_due) else 0.0
+    avg_referral_days = 0.0
+    referral_durations = []
+    for r in referrals:
+        if (r["referral_status"] or "") != "Completed":
+            continue
+        d1 = _parse_date_safe(r["referral_date"])
+        d2 = _parse_date_safe(r["completion_date"])
+        if d1 and d2:
+            referral_durations.append((d2 - d1).days)
+    if referral_durations:
+        avg_referral_days = round(sum(referral_durations) / len(referral_durations), 2)
 
     alerts: List[dict] = []
     if risk_distribution["High"] + risk_distribution["Critical"] > 0:
@@ -447,12 +524,20 @@ def _compute_monitoring(db_path: str, role: str, location_id: str) -> dict:
         "total_children": total_children,
         "total_screened": total_screened,
         "high_risk_children": risk_distribution["High"] + risk_distribution["Critical"],
+        "intervention_active_children": intervention_active_children,
         "risk_distribution": dict(risk_distribution),
         "pending_referrals": pending_referrals,
+        "total_referred_children": sum(1 for r in referrals if int(r["referral_required"] or 0) == 1),
         "completed_referrals": completed_referrals,
+        "under_treatment_referrals": under_treatment_referrals,
+        "avg_referral_days": avg_referral_days,
         "followup_due": followup_due,
         "followup_done": followup_done,
+        "followup_improving": followup_improving,
+        "followup_worsening": followup_worsening,
+        "followup_same": followup_same,
         "screening_coverage": coverage,
+        "coverage_warning": coverage < 80,
         "followup_compliance": followup_compliance,
         "referral_completion": referral_completion,
         "age_band_risk_rows": list(age_band_rows.values()),
@@ -462,9 +547,12 @@ def _compute_monitoring(db_path: str, role: str, location_id: str) -> dict:
         "district_ranking": district_ranking,
         "alerts": alerts,
         "domain_burden": dict(domain_burden),
+        "high_risk_children_rows": high_risk_children[:50],
         "priority_children": priority_children[:5],
         "overdue_referrals": sorted(overdue_referrals, key=lambda x: x["days_pending"], reverse=True),
         "trend_rows": trend_rows,
+        "aww_trained": True if role == "aww" else None,
+        "training_mode": "Blended" if role == "aww" else "",
     }
 
 

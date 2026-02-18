@@ -1,0 +1,74 @@
+{% extends 'base.html' %}
+{% block title %}Problem D - AWW{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="section-header"><h2>{{ title }}</h2><span class="tag">Role: AWW</span></div>
+  <form class="filter-row" method="get">
+    <label>AWC ID<input type="text" name="location_id" value="{{ location_id }}" placeholder="AWC001"></label>
+    <button class="btn primary" type="submit">Apply</button>
+  </form>
+  <div class="stat-grid">
+    <div class="stat-card"><div><div class="stat-value">{{ total_children }}</div><div class="stat-label">Total Children</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ improving_pct }}%</div><div class="stat-label">Children Improving %</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ worsening_pct }}%</div><div class="stat-label">Children Worsening %</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ chronic_cases }}</div><div class="stat-label">Chronic Risk Cases</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ avg_improvement_days }}</div><div class="stat-label">Avg Time to Improvement (days)</div></div></div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-header"><h2>High Risk % Trend (Last 6 Months)</h2></div>
+  <div class="table-wrap">
+    <table class="kpi-table">
+      <thead><tr><th>Month</th><th>Screenings</th><th>High Risk Cases</th><th>High Risk %</th></tr></thead>
+      <tbody>
+      {% for row in trend_rows %}
+        <tr><td>{{ row.month }}</td><td>{{ row.screenings }}</td><td>{{ row.high_risk }}</td><td>{{ row.high_risk_pct }}%</td></tr>
+      {% empty %}
+        <tr><td colspan="4">No trend data.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-header"><h2>Child List With Trend Status</h2></div>
+  <form class="filter-row" method="get">
+    <input type="hidden" name="location_id" value="{{ location_id }}">
+    <label>Filter
+      <select name="trend_filter">
+        <option value="">All</option>
+        <option value="worsening" {% if request.GET.trend_filter == 'worsening' %}selected{% endif %}>Worsening</option>
+        <option value="chronic" {% if request.GET.trend_filter == 'chronic' %}selected{% endif %}>Chronic Cases</option>
+        <option value="active" {% if request.GET.trend_filter == 'active' %}selected{% endif %}>Intervention Active</option>
+      </select>
+    </label>
+    <button class="btn primary" type="submit">Apply Filter</button>
+  </form>
+  <div class="table-wrap">
+    <table class="kpi-table">
+      <thead><tr><th>Child</th><th>Age</th><th>Current Risk</th><th>Trend</th><th>Intervention</th><th>Last Screening</th><th>Action</th></tr></thead>
+      <tbody>
+      {% for row in child_trend_rows %}
+        {% if request.GET.trend_filter == 'worsening' and row.trend != 'Worsening' %}{% elif request.GET.trend_filter == 'chronic' and not row.chronic %}{% elif request.GET.trend_filter == 'active' and not row.intervention_active %}{% else %}
+        <tr>
+          <td>{{ row.child_name }}</td>
+          <td>{{ row.age_months }}</td>
+          <td>{{ row.current_risk }}</td>
+          <td>
+            {% if row.trend == 'Improving' %}<span class="risk-badge risk-low">Improving</span>{% elif row.trend == 'Worsening' %}<span class="risk-badge risk-high">Worsening</span>{% else %}<span class="risk-badge risk-medium">Stable</span>{% endif %}
+          </td>
+          <td>{% if row.intervention_active %}Active{% else %}Inactive{% endif %}</td>
+          <td>{{ row.last_screening }}</td>
+          <td><a class="btn tiny ghost" href="{% url 'core:impact_child_profile' row.child_id %}">View Profile</a></td>
+        </tr>
+        {% endif %}
+      {% empty %}
+        <tr><td colspan="7">No child trend data.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

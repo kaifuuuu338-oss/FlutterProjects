@@ -1,0 +1,24 @@
+{% extends 'base.html' %}
+{% block title %}Problem D Entry{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="section-header">
+    <h2>{{ title }}</h2>
+    <span class="tag">Longitudinal Impact</span>
+  </div>
+  <div class="results-card">
+    <div class="results-title">Open Problem D by Role</div>
+    <div class="results-sub">Use these direct links:</div>
+    <div class="results-actions">
+      <a class="btn ghost" href="/problem-d/aww/">AWW</a>
+      <a class="btn ghost" href="/problem-d/supervisor/">Supervisor</a>
+      <a class="btn ghost" href="/problem-d/cdpo/">CDPO</a>
+      <a class="btn ghost" href="/problem-d/district/">District</a>
+      <a class="btn ghost" href="/problem-d/state/">State</a>
+    </div>
+    <div class="results-sub" style="margin-top:10px;">Your role dashboard:
+      <a href="{% url current_url_name %}">{% url current_url_name %}</a>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -11,28 +11,165 @@
     <button class="btn primary" type="submit">Apply</button>
   </form>
   {% if alerts %}
-    <div class="alerts-wrap">{% for a in alerts %}<div class="alert-line">{{ a.level|upper }}: {{ a.message }}</div>{% endfor %}</div>
+    <div class="alerts-wrap">{% for a in alerts %}<div class="alert-line alert-{{ a.level|default:'yellow' }}">{{ a.level|upper }}: {{ a.message }}</div>{% endfor %}</div>
   {% endif %}
   <div class="stat-grid">
     <div class="stat-card"><div><div class="stat-value">{{ total_children }}</div><div class="stat-label">Total Children</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ total_screened }}</div><div class="stat-label">Total Children Screened</div></div></div>
     <div class="stat-card"><div><div class="stat-value">{{ high_risk_children }}</div><div class="stat-label">High/Critical Children</div></div></div>
     <div class="stat-card"><div><div class="stat-value">{{ pending_referrals }}</div><div class="stat-label">Pending Referrals</div></div></div>
     <div class="stat-card"><div><div class="stat-value">{{ followup_due }}</div><div class="stat-label">Follow-ups Due</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ intervention_active_children|default:0 }}</div><div class="stat-label">Intervention Active Children</div></div></div>
   </div>
 </section>
+<section class="section">
+  <div class="section-header"><h2>High Risk Alert Panel</h2></div>
+  <div class="table-wrap">
+    <table class="kpi-table">
+      <thead>
+        <tr>
+          <th>Child Name / ID</th>
+          <th>Age</th>
+          <th>Risk</th>
+          <th>Domain Affected</th>
+          <th>Referral Status</th>
+          <th>Days Since Flagged</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in high_risk_children_rows %}
+          <tr>
+            <td>{{ c.child_name }}</td>
+            <td>{{ c.age_months }}</td>
+            <td><span class="risk-badge risk-{{ c.risk_category|lower }}">{{ c.risk_category }}</span></td>
+            <td>{{ c.domain_affected }}</td>
+            <td>{{ c.referral_status }}</td>
+            <td>{{ c.days_since_flagged }}</td>
+            <td>
+              <div class="action-buttons-inline">
+                <form method="post" action="{% url 'core:mark_referral_done_by_key' %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="location_id" value="{{ location_id }}">
+                  <input type="hidden" name="child_key" value="{{ c.child_id }}">
+                  <button type="submit" class="btn tiny">Mark Referral Done</button>
+                </form>
+                <form method="post" action="{% url 'core:schedule_followup_by_key' %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="location_id" value="{{ location_id }}">
+                  <input type="hidden" name="child_key" value="{{ c.child_id }}">
+                  <button type="submit" class="btn tiny ghost">Schedule Follow-up</button>
+                </form>
+                {% if c.child_db_id %}
+                  <a class="btn tiny ghost" href="{% url 'core:child_profile' c.child_db_id %}">View Child Profile</a>
+                {% else %}
+                  <span class="tag subtle">Profile from FastAPI record</span>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="7">No High/Critical children currently.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-header"><h2>Referral Tracking</h2></div>
+  <div class="stat-grid">
+    <div class="stat-card"><div><div class="stat-value">{{ total_referred_children|default:0 }}</div><div class="stat-label">Total Referred</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ completed_referrals|default:0 }}</div><div class="stat-label">Completed Referrals</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ pending_referrals|default:0 }}</div><div class="stat-label">Pending Referrals</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ avg_referral_days|default:0 }}</div><div class="stat-label">Avg Days to Complete</div></div></div>
+  </div>
+  {% if overdue_referrals %}
+    <div class="alerts-wrap">
+      <div class="alert-line alert-yellow">YELLOW: {{ overdue_referrals|length }} referral(s) pending more than 14 days.</div>
+    </div>
+  {% endif %}
+</section>
+
+<section class="section">
+  <div class="section-header"><h2>Follow-up Compliance</h2></div>
+  <div class="stat-grid">
+    <div class="stat-card"><div><div class="stat-value">{{ followup_done }}</div><div class="stat-label">Follow-ups Completed</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ followup_due }}</div><div class="stat-label">Follow-ups Pending</div></div></div>
+    <div class="stat-card"><div><div class="stat-value status-good">{{ followup_improving|default:0 }}</div><div class="stat-label">Improving</div></div></div>
+    <div class="stat-card"><div><div class="stat-value status-same">{{ followup_same|default:0 }}</div><div class="stat-label">Same</div></div></div>
+    <div class="stat-card"><div><div class="stat-value status-bad">{{ followup_worsening|default:0 }}</div><div class="stat-label">Worsening</div></div></div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-header"><h2>Domain Burden</h2></div>
+  <div class="mini-chart-wrap">
+    <div class="mini-bar-row">
+      <div class="mini-bar-label">GM</div>
+      <div class="mini-bar-track"><div class="mini-bar-fill" style="width:{% widthratio domain_burden.GM|default:0 20 100 %}%"></div></div>
+      <div class="mini-bar-value">{{ domain_burden.GM|default:0 }}</div>
+    </div>
+    <div class="mini-bar-row">
+      <div class="mini-bar-label">FM</div>
+      <div class="mini-bar-track"><div class="mini-bar-fill" style="width:{% widthratio domain_burden.FM|default:0 20 100 %}%"></div></div>
+      <div class="mini-bar-value">{{ domain_burden.FM|default:0 }}</div>
+    </div>
+    <div class="mini-bar-row">
+      <div class="mini-bar-label">LC</div>
+      <div class="mini-bar-track"><div class="mini-bar-fill" style="width:{% widthratio domain_burden.LC|default:0 20 100 %}%"></div></div>
+      <div class="mini-bar-value">{{ domain_burden.LC|default:0 }}</div>
+    </div>
+    <div class="mini-bar-row">
+      <div class="mini-bar-label">COG</div>
+      <div class="mini-bar-track"><div class="mini-bar-fill" style="width:{% widthratio domain_burden.COG|default:0 20 100 %}%"></div></div>
+      <div class="mini-bar-value">{{ domain_burden.COG|default:0 }}</div>
+    </div>
+    <div class="mini-bar-row">
+      <div class="mini-bar-label">SE</div>
+      <div class="mini-bar-track"><div class="mini-bar-fill" style="width:{% widthratio domain_burden.SE|default:0 20 100 %}%"></div></div>
+      <div class="mini-bar-value">{{ domain_burden.SE|default:0 }}</div>
+    </div>
+  </div>
+</section>
+
 <section class="section">
   <div class="section-header"><h2>Top 5 Priority Children</h2></div>
   <div class="table-wrap">
     <table class="kpi-table">
-      <thead><tr><th>Child ID</th><th>Risk</th><th>Age Months</th><th>Mandal</th></tr></thead>
+      <thead><tr><th>Priority</th><th>Child ID</th><th>Risk</th><th>Age Months</th><th>Mandal</th></tr></thead>
       <tbody>
         {% for c in priority_children %}
-          <tr><td>{{ c.child_id }}</td><td>{{ c.risk }}</td><td>{{ c.age_months }}</td><td>{{ c.mandal_id }}</td></tr>
+          <tr><td>P{{ c.rank }}</td><td>{{ c.child_id }}</td><td>{{ c.risk }}</td><td>{{ c.age_months }}</td><td>{{ c.mandal_id }}</td></tr>
         {% empty %}
-          <tr><td colspan="4">No urgent children currently.</td></tr>
+          <tr><td colspan="5">No urgent children currently.</td></tr>
         {% endfor %}
       </tbody>
     </table>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-header"><h2>Screening Coverage</h2></div>
+  <div class="coverage-wrap">
+    <div class="coverage-line">
+      <div class="coverage-text">{{ total_screened }} / {{ total_children }} screened</div>
+      <div class="coverage-pct">{{ screening_coverage|default:0 }}%</div>
+    </div>
+    <div class="coverage-track">
+      <div class="coverage-fill" style="width: {{ screening_coverage|default:0 }}%"></div>
+    </div>
+    {% if coverage_warning %}
+      <div class="coverage-warning">Warning: Screening coverage is below 80%.</div>
+    {% endif %}
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-header"><h2>Training Status</h2></div>
+  <div class="stat-grid">
+    <div class="stat-card"><div><div class="stat-value">{% if aww_trained %}Yes{% else %}No{% endif %}</div><div class="stat-label">AWW Trained</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ training_mode|default:"N/A" }}</div><div class="stat-label">Training Mode</div></div></div>
   </div>
 </section>
 {% endblock %}
