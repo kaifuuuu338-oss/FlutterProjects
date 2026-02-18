@@ -5,7 +5,7 @@ enum ReferralType { rbsk, phc, specialist, educational }
 enum ReferralUrgency { normal, urgent, immediate }
 
 /// Referral status
-enum ReferralStatus { pending, scheduled, completed, cancelled }
+enum ReferralStatus { pending, scheduled, completed, underTreatment, cancelled }
 
 /// Model representing a Referral
 class ReferralModel {
@@ -54,7 +54,7 @@ class ReferralModel {
         orElse: () => ReferralUrgency.normal,
       ),
       status: ReferralStatus.values.firstWhere(
-        (e) => e.toString().split('.').last == (json['status'] ?? 'pending'),
+        (e) => e.toString().split('.').last.toLowerCase() == (json['status'] ?? 'pending').toString().replaceAll('_', '').toLowerCase(),
         orElse: () => ReferralStatus.pending,
       ),
       notes: json['notes'],

@@ -95,6 +95,16 @@ class LocalDBService {
     return ReferralModel.fromJson(Map<String, dynamic>.from(data));
   }
 
+  Future<void> updateReferralStatus(String referralId, ReferralStatus status) async {
+    final existing = getReferral(referralId);
+    if (existing == null) return;
+    final updated = existing.copyWith(
+      status: status,
+      completedAt: status == ReferralStatus.completed ? DateTime.now() : existing.completedAt,
+    );
+    await saveReferral(updated);
+  }
+
   List<ReferralModel> getChildReferrals(String childId) {
     return _safeReferralList().where((r) => r.childId == childId).toList();
   }
