@@ -39,7 +39,9 @@ try:
         assign_activities_for_child,
         compute_compliance,
         derive_severity,
+        determine_next_action,
         escalation_decision,
+        plan_regeneration_summary,
         projection_from_compliance,
         reset_frequency_status,
         weekly_progress_rows,
@@ -49,7 +51,9 @@ except Exception:
         assign_activities_for_child,
         compute_compliance,
         derive_severity,
+        determine_next_action,
         escalation_decision,
+        plan_regeneration_summary,
         projection_from_compliance,
         reset_frequency_status,
         weekly_progress_rows,
@@ -151,6 +155,11 @@ def create_app() -> FastAPI:
         compliance = compute_compliance(rows)
         phase_weeks = int(summary.get("phase_duration_weeks", 1) or 1)
         weekly_rows = weekly_progress_rows(rows, phase_weeks)
+        weeks_completed = len([r for r in weekly_rows if int(r.get("completion_percentage", 0)) > 0])
+        adherence_percent = int(compliance.get("completion_percent", 0))
+        improvement = 0
+        action = determine_next_action(improvement, adherence_percent, weeks_completed)
+        regen = plan_regeneration_summary(len(rows), action, summary.get("domains", []))
         return {
             "summary": summary,
             "activities": rows,
@@ -158,6 +167,8 @@ def create_app() -> FastAPI:
             "weekly_progress": weekly_rows,
             "projection": projection_from_compliance(int(compliance.get("completion_percent", 0))),
             "escalation_decision": escalation_decision(weekly_rows),
+            "next_action": action,
+            "plan_regeneration": regen,
         }
 
     @app.get("/health")

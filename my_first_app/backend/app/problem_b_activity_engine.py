@@ -36,6 +36,11 @@ SEVERITY_TO_PHASE_WEEKS = {
     "Critical": 16,
 }
 
+IMPROVEMENT_THRESHOLD = 1  # months reduction
+ADHERENCE_THRESHOLD = 0.6  # 60%
+ESCALATION_THRESHOLD = 0.4  # 40%
+MAX_PHASE_WEEKS = 8
+
 
 @dataclass(frozen=True)
 class ActivityTemplate:
@@ -426,6 +431,44 @@ def projection_from_compliance(completion_percent: int) -> str:
     if completion_percent >= 50:
         return "Moderate"
     return "Low"
+
+
+def determine_next_action(
+    improvement: int,
+    adherence_percent: int,
+    weeks_completed: int,
+) -> str:
+    adherence = adherence_percent / 100.0
+    if adherence < ESCALATION_THRESHOLD:
+        return "Intensify_AWW_Caregiver_Coaching"
+    if weeks_completed >= MAX_PHASE_WEEKS and improvement < IMPROVEMENT_THRESHOLD:
+        return "Refer_To_Specialist"
+    if improvement >= IMPROVEMENT_THRESHOLD and adherence >= ADHERENCE_THRESHOLD:
+        return "Reduce_Intensity"
+    return "Continue_Current_Plan"
+
+
+def plan_regeneration_summary(
+    current_activity_count: int,
+    action: str,
+    delayed_domains: List[str],
+) -> Dict:
+    extra_activities = 0
+    review_interval_delta_days = 0
+    if action == "Intensify_AWW_Caregiver_Coaching":
+        extra_activities = max(2, len(delayed_domains) * 2)
+        review_interval_delta_days = -7
+    elif action == "Refer_To_Specialist":
+        extra_activities = 0
+        review_interval_delta_days = -15
+    updated_count = current_activity_count + extra_activities
+    return {
+        "current_activity_count": current_activity_count,
+        "updated_activity_count": updated_count,
+        "extra_activities_added": extra_activities,
+        "review_interval_delta_days": review_interval_delta_days,
+        "action": action,
+    }
 
 
 def escalation_decision(weekly_rows: List[Dict]) -> str:

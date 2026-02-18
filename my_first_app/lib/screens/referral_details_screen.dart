@@ -65,6 +65,16 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
   String _engineTargetMilestone = '';
   String _engineProjection = 'Moderate';
   String _engineEscalationDecision = 'Continue';
+  String _engineNextAction = 'Continue_Current_Plan';
+  Map<String, dynamic> _enginePlanRegen = <String, dynamic>{};
+  DateTime? _caregiverFromDate;
+  DateTime? _caregiverToDate;
+  DateTime? _awwFromDate;
+  DateTime? _awwToDate;
+  String _caregiverDomainFilter = 'All';
+  String _awwDomainFilter = 'All';
+  int _caregiverWeekIndex = 0;
+  int _awwWeekIndex = 0;
   final Map<String, bool> _awwTaskChecks = <String, bool>{};
   final Map<String, bool> _caregiverTaskChecks = <String, bool>{};
   final Map<String, bool> _awwChecklist = <String, bool>{
@@ -163,6 +173,14 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
     _engineComplianceAction = compliance['action']?.toString() ?? 'Reinforce';
     _engineProjection = response['projection']?.toString() ?? 'Moderate';
     _engineEscalationDecision = response['escalation_decision']?.toString() ?? 'Continue';
+    _engineNextAction = response['next_action']?.toString() ?? _engineNextAction;
+    _enginePlanRegen = Map<String, dynamic>.from(response['plan_regeneration'] ?? {});
+    final defaultFrom = _enginePhaseStartDate ?? widget.createdAt;
+    final defaultTo = _enginePhaseEndDate ?? widget.expectedFollowUpDate;
+    _caregiverFromDate ??= defaultFrom;
+    _caregiverToDate ??= defaultTo;
+    _awwFromDate ??= defaultFrom;
+    _awwToDate ??= defaultTo;
   }
 
   Future<void> _markEngineActivity(_EngineActivity activity, bool done) async {
@@ -249,6 +267,24 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
     final mm = date.month.toString().padLeft(2, '0');
     final dd = date.day.toString().padLeft(2, '0');
     return '${date.year}-$mm-$dd';
+  }
+
+  String _formatPrettyDate(DateTime date) {
+    const months = <String>[
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return '${date.day} ${months[date.month - 1]} ${date.year}';
   }
 
   int _priorityScore() {
@@ -579,6 +615,49 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
     return 'Preschool 3';
   }
 
+  List<_WeekRange> _buildWeekRanges() {
+    final start = _enginePhaseStartDate ?? widget.createdAt;
+    final weeks = _enginePhaseWeeks > 0 ? _enginePhaseWeeks : 8;
+    return List<_WeekRange>.generate(weeks, (index) {
+      final s = start.add(Duration(days: index * 7));
+      final e = s.add(const Duration(days: 6));
+      return _WeekRange(index + 1, s, e);
+    });
+  }
+
+  String _weekLabel(_WeekRange range) {
+    const months = <String>[
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return '${range.start.day} ${months[range.start.month - 1]} - ${range.end.day} ${months[range.end.month - 1]}';
+  }
+
+  Future<void> _pickDate({
+    required DateTime initial,
+    required ValueChanged<DateTime> onPicked,
+  }) async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(2020, 1, 1),
+      lastDate: DateTime(2100, 12, 31),
+    );
+    if (picked != null && mounted) {
+      setState(() => onPicked(picked));
+    }
+  }
+
   ReferralStatus _toReferralStatus(String value) {
     switch (value) {
       case 'scheduled':
@@ -815,6 +894,381 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
     );
   }
 
+  Widget _datePickerBox({
+    required DateTime date,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        height: 40,
+        width: 170,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          border: Border.all(color: const Color(0xFFD9DCE5)),
+          borderRadius: BorderRadius.circular(8),
+          color: Colors.white.withValues(alpha: 0.7),
+        ),
+        child: Row(
+          children: <Widget>[
+            Expanded(
+              child: Text(
+                _formatPrettyDate(date),
+                style: const TextStyle(fontSize: 12),
+              ),
+            ),
+            const Icon(Icons.calendar_month_outlined, size: 18, color: Color(0xFF2F67C7)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _assignmentManagementCard({
+    required String title,
+    required String stakeholder,
+    required DateTime fromDate,
+    required DateTime toDate,
+    required String domainFilter,
+    required ValueChanged<DateTime> onFromPicked,
+    required ValueChanged<DateTime> onToPicked,
+    required ValueChanged<String> onDomainChanged,
+    required int selectedWeekIndex,
+    required ValueChanged<int> onWeekChanged,
+    required List<_EngineActivity> rows,
+  }) {
+    final domains = <String>{'All', ..._domains};
+    final weekRanges = _buildWeekRanges();
+    final selectedWeek = selectedWeekIndex.clamp(0, weekRanges.isEmpty ? 0 : weekRanges.length - 1);
+    final weekNumber = weekRanges.isEmpty ? 1 : weekRanges[selectedWeek].weekNumber;
+    final filtered = rows.where((r) {
+      if (r.weekNumber != weekNumber) return false;
+      if (domainFilter != 'All' && r.domain != domainFilter) return false;
+      return true;
+    }).toList();
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 14),
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Container(
+            padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+            child: Text(
+              title,
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600, color: Color(0xFF2E2A3B)),
+            ),
+          ),
+          const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 12,
+                  runSpacing: 10,
+                  children: <Widget>[
+                    const Text('From', style: TextStyle(fontSize: 14)),
+                    _datePickerBox(
+                      date: fromDate,
+                      onTap: () => _pickDate(initial: fromDate, onPicked: onFromPicked),
+                    ),
+                    const Text('To', style: TextStyle(fontSize: 14)),
+                    _datePickerBox(
+                      date: toDate,
+                      onTap: () => _pickDate(initial: toDate, onPicked: onToPicked),
+                    ),
+                    Container(
+                      height: 40,
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: const Color(0xFFD9DCE5)),
+                        borderRadius: BorderRadius.circular(8),
+                        color: Colors.white.withValues(alpha: 0.7),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value: domainFilter,
+                          items: domains
+                              .map(
+                                (d) => DropdownMenuItem<String>(
+                                  value: d,
+                                  child: Text(d),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (v) {
+                            if (v != null) onDomainChanged(v);
+                          },
+                        ),
+                      ),
+                    ),
+                    ElevatedButton(
+                      onPressed: () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('$stakeholder tasks saved')),
+                        );
+                      },
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 18),
+                        child: Text('Save'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: <Widget>[
+                      Container(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF4B7CD5),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
+                        child: const Text(
+                          'Weekly',
+                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                      const SizedBox(width: 2),
+                      ...List<Widget>.generate(weekRanges.length, (index) {
+                        final selected = index == selectedWeek;
+                        return InkWell(
+                          onTap: () => onWeekChanged(index),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: selected ? const Color(0xFFEAF0FF) : const Color(0xFFF5F2FB),
+                              border: Border(
+                                bottom: BorderSide(
+                                  color: selected ? const Color(0xFF4B7CD5) : Colors.transparent,
+                                  width: 2,
+                                ),
+                              ),
+                            ),
+                            child: Text(
+                              _weekLabel(weekRanges[index]),
+                              style: TextStyle(
+                                color: const Color(0xFF2E4EA0),
+                                fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        );
+                      }),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: DataTable(
+                    columnSpacing: 24,
+                    columns: const <DataColumn>[
+                      DataColumn(label: Text('Assigned Date')),
+                      DataColumn(label: Text('Domain')),
+                      DataColumn(label: Text('Activity')),
+                      DataColumn(label: Text('Frequency')),
+                      DataColumn(label: Text('Guide')),
+                      DataColumn(label: Text('Status')),
+                    ],
+                    rows: filtered
+                        .map(
+                          (row) => DataRow(
+                            cells: <DataCell>[
+                              DataCell(Text(_formatPrettyDate(row.assignedDate))),
+                              DataCell(Text(row.domain)),
+                              DataCell(SizedBox(width: 260, child: Text(row.title))),
+                              DataCell(Text(row.frequencyType == 'daily' ? 'Daily' : '${row.requiredCount}/week')),
+                              DataCell(
+                                IconButton(
+                                  onPressed: () => _showActivityGuide(row),
+                                  icon: const Icon(Icons.play_circle_outline, color: Color(0xFF3A63C6)),
+                                  tooltip: 'How to do',
+                                ),
+                              ),
+                              DataCell(
+                                Checkbox(
+                                  value: row.status == 'completed',
+                                  onChanged: (v) => _markEngineActivity(row, v ?? false),
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _phaseTimelineCard({
+    required int phaseWeeks,
+    required int currentWeek,
+  }) {
+    return _sectionCard(
+      'Phase Timeline View',
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: List<Widget>.generate(phaseWeeks, (index) {
+          final week = index + 1;
+          final completion = week > currentWeek ? 0 : _weeklyCompletionForWeek(week);
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              children: <Widget>[
+                SizedBox(
+                  width: 74,
+                  child: Text(
+                    'Week $week',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
+                ),
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: LinearProgressIndicator(
+                      minHeight: 8,
+                      value: completion / 100,
+                      backgroundColor: const Color(0xFFE6EAF2),
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        completion >= 80
+                            ? const Color(0xFF43A047)
+                            : completion >= 50
+                                ? const Color(0xFF1E88E5)
+                                : const Color(0xFFF9A825),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 52,
+                  child: Text(
+                    '$completion%',
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }),
+      ),
+    );
+  }
+
+  Widget _phaseLifecycleStagesCard({
+    required int phaseWeeks,
+    required DateTime phaseStart,
+  }) {
+    final midpointWeeks = (phaseWeeks / 2).ceil();
+    final phase1End = phaseStart.add(Duration(days: (midpointWeeks * 7) - 1));
+    final phase2Start = phase1End.add(const Duration(days: 1));
+    final phase2End = phaseStart.add(Duration(days: (phaseWeeks * 7) - 1));
+    return _sectionCard(
+      'Phase Lifecycle Stages',
+      Column(
+        children: <Widget>[
+          _kv('Phase 1 (Weeks 1-$midpointWeeks)', '${_formatPrettyDate(phaseStart)} to ${_formatPrettyDate(phase1End)}'),
+          _kv('Checkpoint 1', 'Review compliance + early milestone progress'),
+          _kv('Phase 2 (Weeks ${midpointWeeks + 1}-$phaseWeeks)', '${_formatPrettyDate(phase2Start)} to ${_formatPrettyDate(phase2End)}'),
+          _kv('Checkpoint 2', 'Reassess delays, adjust intensity, decide escalation'),
+        ],
+      ),
+    );
+  }
+
+  Widget _complianceThresholdCard({
+    required int adherencePercent,
+    required int totalImprovement,
+  }) {
+    final currentRule = adherencePercent < 40
+        ? 'Trigger Intensify'
+        : (totalImprovement < 0 ? 'Trigger Referral Review' : 'Continue current phase');
+    return _sectionCard(
+      'Compliance Threshold Rules',
+      Column(
+        children: <Widget>[
+          _kv('Rule 1', 'If adherence < 40% for 2 weeks -> Intensify'),
+          _kv('Rule 2', 'If no improvement after phase -> Escalate'),
+          _kv('Rule 3', 'If worsening trend -> Specialist review'),
+          _kv('Current trigger', currentRule),
+        ],
+      ),
+    );
+  }
+
+  Widget _planRegenerationCard({
+    required String decision,
+    required int currentActivityCount,
+    required int phaseWeeks,
+  }) {
+    final regenCount = int.tryParse(_enginePlanRegen['updated_activity_count']?.toString() ?? '') ?? currentActivityCount;
+    final extra = int.tryParse(_enginePlanRegen['extra_activities_added']?.toString() ?? '') ?? 0;
+    final deltaDays = int.tryParse(_enginePlanRegen['review_interval_delta_days']?.toString() ?? '') ?? 0;
+    final action = _enginePlanRegen['action']?.toString() ?? decision;
+    final actionLower = action.toLowerCase();
+    final regeneratedText = actionLower.contains('refer')
+        ? 'Escalation path activated: specialist referral + high intensity monitoring.'
+        : (actionLower.contains('intensify')
+            ? 'Regenerated plan with higher weekly targets and increased supervision.'
+            : 'Continue current plan; no regeneration required this cycle.');
+    return _sectionCard(
+      'Post-Review Auto-Adjustment',
+      Column(
+        children: <Widget>[
+          _kv('Review decision', decision),
+          _kv('Auto-action', action),
+          _kv('Current plan activities', '$currentActivityCount'),
+          _kv('Updated plan activities', '$regenCount'),
+          _kv('Extra activities added', '$extra'),
+          _kv('Review interval change', deltaDays == 0 ? 'No change' : '$deltaDays days'),
+          _kv('Regeneration status', regeneratedText),
+        ],
+      ),
+    );
+  }
+
+  void _showActivityGuide(_EngineActivity row) {
+    showDialog<void>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('How to Do This Activity'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text('Activity: ${row.title}', style: const TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            Text('Guidance: ${row.description.isEmpty ? 'Follow AWW demonstrated steps for this activity.' : row.description}'),
+            const SizedBox(height: 8),
+            Text('Duration: ${row.durationMinutes} minutes'),
+            Text('Frequency: ${row.frequencyType == 'daily' ? 'Daily' : '${row.requiredCount} times/week'}'),
+          ],
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -827,6 +1281,8 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
     final awwWeeklyRows = _engineBy(stakeholder: 'aww', frequencyType: 'weekly');
     final caregiverDailyRows = _engineBy(stakeholder: 'caregiver', frequencyType: 'daily');
     final caregiverWeeklyRows = _engineBy(stakeholder: 'caregiver', frequencyType: 'weekly');
+    final caregiverMgmtRows = <_EngineActivity>[...caregiverDailyRows, ...caregiverWeeklyRows];
+    final awwMgmtRows = <_EngineActivity>[...awwDailyRows, ...awwWeeklyRows];
     final fallbackSeverity = _severityFromSnapshot(
       activeDomains,
       ((snapshot['LC'] == 'Critical' || snapshot['LC'] == 'High') &&
@@ -873,6 +1329,10 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
         ? _engineProjection
         : _projectedOutcome(totalImprovement: totalImprovement, adherencePercent: combinedAdherence);
     final improvementRate = _cohortLcCritical == 0 ? 0 : ((_cohortLcImproved / _cohortLcCritical) * 100).round();
+    final needsEscalation = combinedAdherence < 40 || totalImprovement < 0 || decision.toLowerCase().contains('escalate');
+    final reviewDecision = totalImprovement > 2
+        ? 'Continue Phase'
+        : (combinedAdherence < 50 ? 'Intensify' : (needsEscalation ? 'Refer' : 'Continue Phase'));
 
     return Scaffold(
       body: Container(
@@ -1022,6 +1482,45 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
                                   ),
                                 ),
                                 _sectionCard(
+                                  'Compliance Indicator',
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: <Widget>[
+                                      _kv('Weekly compliance', '$combinedAdherence%'),
+                                      _kv('Projected improvement', projectedOutcome),
+                                      _kv('Dynamic action', _engineComplianceAction),
+                                      const SizedBox(height: 8),
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(8),
+                                        child: LinearProgressIndicator(
+                                          minHeight: 10,
+                                          value: combinedAdherence / 100,
+                                          backgroundColor: const Color(0xFFE3E8F2),
+                                          valueColor: AlwaysStoppedAnimation<Color>(
+                                            combinedAdherence >= 80
+                                                ? const Color(0xFF43A047)
+                                                : combinedAdherence >= 50
+                                                    ? const Color(0xFF1E88E5)
+                                                    : const Color(0xFFE53935),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                _phaseTimelineCard(
+                                  phaseWeeks: phaseWeeks,
+                                  currentWeek: currentWeek,
+                                ),
+                                _phaseLifecycleStagesCard(
+                                  phaseWeeks: phaseWeeks,
+                                  phaseStart: _enginePhaseStartDate ?? widget.createdAt,
+                                ),
+                                _complianceThresholdCard(
+                                  adherencePercent: combinedAdherence,
+                                  totalImprovement: totalImprovement,
+                                ),
+                                _sectionCard(
                                   'Daily Core Routine (Mandatory)',
                                   dailyCoreEngineRows.isEmpty
                                       ? const Text('No mandatory daily routine detected for current delayed domains.')
@@ -1130,6 +1629,32 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
                                 _engineTable(
                                   title: 'Caregiver Weekly Goals',
                                   rows: caregiverWeeklyRows,
+                                ),
+                                _assignmentManagementCard(
+                                  title: 'Caregiver Assigned Intervention Tasks - Daily Management',
+                                  stakeholder: 'Caregiver',
+                                  fromDate: _caregiverFromDate ?? (_enginePhaseStartDate ?? widget.createdAt),
+                                  toDate: _caregiverToDate ?? (_enginePhaseEndDate ?? widget.expectedFollowUpDate),
+                                  domainFilter: _caregiverDomainFilter,
+                                  onFromPicked: (d) => _caregiverFromDate = d,
+                                  onToPicked: (d) => _caregiverToDate = d,
+                                  onDomainChanged: (v) => setState(() => _caregiverDomainFilter = v),
+                                  selectedWeekIndex: _caregiverWeekIndex,
+                                  onWeekChanged: (v) => setState(() => _caregiverWeekIndex = v),
+                                  rows: caregiverMgmtRows,
+                                ),
+                                _assignmentManagementCard(
+                                  title: 'AWW Assigned Intervention Tasks - Daily Management',
+                                  stakeholder: 'AWW',
+                                  fromDate: _awwFromDate ?? (_enginePhaseStartDate ?? widget.createdAt),
+                                  toDate: _awwToDate ?? (_enginePhaseEndDate ?? widget.expectedFollowUpDate),
+                                  domainFilter: _awwDomainFilter,
+                                  onFromPicked: (d) => _awwFromDate = d,
+                                  onToPicked: (d) => _awwToDate = d,
+                                  onDomainChanged: (v) => setState(() => _awwDomainFilter = v),
+                                  selectedWeekIndex: _awwWeekIndex,
+                                  onWeekChanged: (v) => setState(() => _awwWeekIndex = v),
+                                  rows: awwMgmtRows,
                                 ),
                                 _taskTable(
                                   title: 'AWW Tasks Table (Issue-Specific)',
@@ -1242,6 +1767,66 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
                                   ),
                                 ),
                                 _sectionCard(
+                                  'Monthly / Review Assessment',
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: <Widget>[
+                                      _kv('Baseline delay (LC)', '$baselineLc months'),
+                                      _kv('Current delay (LC)', '$followupLc months'),
+                                      _kv('Improvement', '$lcGain months'),
+                                      _kv('Status', _trend()),
+                                      _kv('Recommended action', reviewDecision),
+                                      const SizedBox(height: 8),
+                                      Wrap(
+                                        spacing: 8,
+                                        runSpacing: 8,
+                                        children: <Widget>[
+                                          OutlinedButton(
+                                            onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
+                                              const SnackBar(content: Text('Decision saved: Continue Phase')),
+                                            ),
+                                            child: const Text('Continue Phase'),
+                                          ),
+                                          OutlinedButton(
+                                            onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
+                                              const SnackBar(content: Text('Decision saved: Intensify')),
+                                            ),
+                                            child: const Text('Intensify'),
+                                          ),
+                                          ElevatedButton(
+                                            onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
+                                              const SnackBar(content: Text('Decision saved: Refer')),
+                                            ),
+                                            child: const Text('Refer'),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                _planRegenerationCard(
+                                  decision: reviewDecision,
+                                  currentActivityCount: _engineActivities.length,
+                                  phaseWeeks: phaseWeeks,
+                                ),
+                                if (needsEscalation)
+                                  _sectionCard(
+                                    'Escalation & Referral Logic',
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: <Widget>[
+                                        _kv('Escalation status', 'Triggered'),
+                                        _kv('Reason', combinedAdherence < 40
+                                            ? 'Compliance below 40%'
+                                            : (totalImprovement < 0
+                                                ? 'Worsening trend in follow-up'
+                                                : 'Rule engine escalation')),
+                                        _kv('Action', 'Specialist referral review recommended'),
+                                        _kv('Urgency', widget.urgency),
+                                      ],
+                                    ),
+                                  ),
+                                _sectionCard(
                                   'Expected Outcome & Escalation Logic',
                                   Column(
                                     children: <Widget>[
@@ -1304,11 +1889,13 @@ class _EngineActivity {
   final String frequencyType;
   final String activityType;
   final String title;
+  final String description;
   final String status;
   final int durationMinutes;
   final int weekNumber;
   final int requiredCount;
   final int completedCount;
+  final DateTime assignedDate;
 
   const _EngineActivity({
     required this.activityId,
@@ -1317,11 +1904,13 @@ class _EngineActivity {
     required this.frequencyType,
     required this.activityType,
     required this.title,
+    required this.description,
     required this.status,
     required this.durationMinutes,
     required this.weekNumber,
     required this.requiredCount,
     required this.completedCount,
+    required this.assignedDate,
   });
 
   factory _EngineActivity.fromJson(Map<String, dynamic> json) {
@@ -1332,11 +1921,13 @@ class _EngineActivity {
       frequencyType: json['frequency_type']?.toString() ?? '',
       activityType: json['activity_type']?.toString() ?? 'weekly_target',
       title: json['title']?.toString() ?? '',
+      description: json['description']?.toString() ?? '',
       status: json['status']?.toString() ?? 'pending',
       durationMinutes: int.tryParse(json['duration_minutes']?.toString() ?? '') ?? 10,
       weekNumber: int.tryParse(json['week_number']?.toString() ?? '') ?? 1,
       requiredCount: int.tryParse(json['required_count']?.toString() ?? '') ?? 1,
       completedCount: int.tryParse(json['completed_count']?.toString() ?? '') ?? 0,
+      assignedDate: DateTime.tryParse(json['assigned_date']?.toString() ?? '') ?? DateTime.now(),
     );
   }
 
@@ -1351,11 +1942,13 @@ class _EngineActivity {
       frequencyType: frequencyType,
       activityType: activityType,
       title: title,
+      description: description,
       status: status ?? this.status,
       durationMinutes: durationMinutes,
       weekNumber: weekNumber,
       requiredCount: requiredCount,
       completedCount: completedCount ?? this.completedCount,
+      assignedDate: assignedDate,
     );
   }
 }
@@ -1378,4 +1971,12 @@ class _EngineWeekProgress {
       reviewNotes: json['review_notes']?.toString() ?? 'Planned',
     );
   }
+}
+
+class _WeekRange {
+  final int weekNumber;
+  final DateTime start;
+  final DateTime end;
+
+  const _WeekRange(this.weekNumber, this.start, this.end);
 }

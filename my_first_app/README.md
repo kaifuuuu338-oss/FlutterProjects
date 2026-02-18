@@ -2,6 +2,10 @@
 
 A new Flutter project.
 
+## Problem B Submission
+
+See `docs/PROBLEM_B_SUBMISSION.md` for the final Problem B explanation and auto-adjustment logic.
+
 ## Getting Started
 
 This project is a starting point for a Flutter application.
