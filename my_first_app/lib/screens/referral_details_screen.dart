@@ -116,9 +116,11 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
     }
 
   Future<void> _loadEngineActivities() async {
-    if (_latest == null) return;
     final snapshot = _snapshot();
-    final delayed = _activeDomains(snapshot);
+    var delayed = _activeDomains(snapshot);
+    if (delayed.isEmpty) {
+      delayed = _domainsFromReasons(widget.reasons);
+    }
     final autismRisk = ((snapshot['LC'] == 'Critical' || snapshot['LC'] == 'High') &&
             (snapshot['SE'] == 'Critical' || snapshot['SE'] == 'High'))
         ? 'High'
@@ -300,13 +302,46 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
   Map<String, String> _snapshot() {
     final out = <String, String>{};
     for (final d in _domains) {
-      out[d] = _statusFromRisk(_riskFromScore(_latest?.domainScores[d]));
+      out[d] = 'Normal';
+    }
+    if (_latest != null) {
+      for (final d in _domains) {
+        out[d] = _statusFromRisk(_riskFromScore(_latest?.domainScores[d]));
+      }
+      return out;
+    }
+    final reasonDomains = _domainsFromReasons(widget.reasons);
+    if (reasonDomains.isEmpty) return out;
+    final reasonText = widget.reasons.join(' ');
+    for (final domain in reasonDomains) {
+      out[domain] = _statusFromReason(reasonText);
     }
     return out;
   }
 
   List<String> _activeDomains(Map<String, String> snapshot) {
     return snapshot.entries.where((e) => e.value != 'Normal').map((e) => e.key).toList();
+  }
+
+  List<String> _domainsFromReasons(List<String> reasons) {
+    final result = <String>{};
+    for (final reason in reasons) {
+      final r = reason.toLowerCase();
+      if (r.contains('gm') || r.contains('gross motor')) result.add('GM');
+      if (r.contains('fm') || r.contains('fine motor')) result.add('FM');
+      if (r.contains('lc') || r.contains('language')) result.add('LC');
+      if (r.contains('cog') || r.contains('cognitive')) result.add('COG');
+      if (r.contains('se') || r.contains('social') || r.contains('emotional')) result.add('SE');
+    }
+    return result.toList();
+  }
+
+  String _statusFromReason(String reasonText) {
+    final r = reasonText.toLowerCase();
+    if (r.contains('critical')) return 'Critical';
+    if (r.contains('high')) return 'High';
+    if (r.contains('mild')) return 'Mild Delay';
+    return 'Mild Delay';
   }
 
   List<String> _centerPlan(String domain) {
@@ -468,11 +503,12 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
   }
 
   String _intensity() {
-    final t = _trend();
-    if (widget.overallRisk.toLowerCase() == 'critical' || t == 'Worsening') {
+    final severity = _engineSeverity.isNotEmpty ? _engineSeverity : widget.overallRisk;
+    final normalized = _normalizedSeverity(severity);
+    if (normalized == 'Critical' || normalized == 'Severe') {
       return 'High - Daily structured stimulation';
     }
-    if (t == 'Improving') return 'Moderate - 3x weekly';
+    if (normalized == 'Moderate') return 'Moderate - 3x weekly';
     return 'Routine - Reinforcement only';
   }
 
@@ -526,26 +562,26 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
   String _expectedImprovementWindow(String severity) {
     switch (_normalizedSeverity(severity)) {
       case 'Critical':
-        return 'Specialist referral + 15-day monitoring';
+        return 'Referral + 15-day monitoring';
       case 'Severe':
-        return '12-16 weeks';
+        return '3-4 months';
       case 'Moderate':
-        return '8-12 weeks';
+        return '2-3 months';
       default:
-        return '6-8 weeks';
+        return '1-2 months';
     }
   }
 
   int _totalWeeksForSeverity(String severity) {
     switch (_normalizedSeverity(severity)) {
       case 'Critical':
-        return 2;
-      case 'Severe':
         return 16;
-      case 'Moderate':
+      case 'Severe':
         return 12;
-      default:
+      case 'Moderate':
         return 8;
+      default:
+        return 6;
     }
   }
 
@@ -847,6 +883,20 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
     final fromEngine = _engineWeeklyProgress.where((w) => w.weekNumber == weekNumber);
     if (fromEngine.isNotEmpty) return fromEngine.first.reviewNotes;
     return _weeklyNote(completion);
+  }
+
+  int _completionPercentForStakeholder(String stakeholder, int weekNumber) {
+    final bucket = _engineActivities.where((a) => a.stakeholder == stakeholder && a.weekNumber == weekNumber).toList();
+    if (bucket.isEmpty) return 0;
+    var required = 0;
+    var done = 0;
+    for (final row in bucket) {
+      final req = row.requiredCount <= 0 ? 1 : row.requiredCount;
+      required += req;
+      final completed = row.completedCount > req ? req : row.completedCount;
+      done += completed;
+    }
+    return ((done / (required == 0 ? 1 : required)) * 100).round();
   }
 
   Widget _engineTable({
@@ -1274,7 +1324,10 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
     final l10n = AppLocalizations.of(context);
     final isWide = MediaQuery.of(context).size.width >= 900;
     final snapshot = _snapshot();
-    final activeDomains = _activeDomains(snapshot);
+    var activeDomains = _activeDomains(snapshot);
+    if (activeDomains.isEmpty) {
+      activeDomains = _domainsFromReasons(widget.reasons);
+    }
     final awwRows = activeDomains.expand(_awwTasksForDomain).toList();
     final caregiverRows = activeDomains.expand(_caregiverTasksForDomain).toList();
     final awwDailyRows = _engineBy(stakeholder: 'aww', frequencyType: 'daily');
@@ -1301,10 +1354,37 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
     final caregiverChecked = _checkedCount(_caregiverTaskChecks, caregiverRows);
     final checklistChecked = _awwChecklist.values.where((v) => v).length;
     final checklistTotal = _awwChecklist.length;
-    final awwCompletion = awwRows.isEmpty ? 0 : ((awwChecked / awwRows.length) * 100).round();
-    final caregiverCompletion = caregiverRows.isEmpty ? 0 : ((caregiverChecked / caregiverRows.length) * 100).round();
     final checklistCompletion = checklistTotal == 0 ? 0 : ((checklistChecked / checklistTotal) * 100).round();
-    final combinedAdherence = ((awwCompletion + caregiverCompletion + checklistCompletion + _engineCompliancePercent) / 4).round();
+    int awwCompletion;
+    int caregiverCompletion;
+    int combinedAdherence;
+    var awwEngineTotal = 0;
+    var awwEngineDone = 0;
+    var caregiverEngineTotal = 0;
+    var caregiverEngineDone = 0;
+    if (_engineActivities.isNotEmpty) {
+      final awwBucket = _engineActivities.where((a) => a.stakeholder == 'aww' && a.weekNumber == currentWeek).toList();
+      for (final row in awwBucket) {
+        final req = row.requiredCount <= 0 ? 1 : row.requiredCount;
+        awwEngineTotal += req;
+        awwEngineDone += row.completedCount > req ? req : row.completedCount;
+      }
+      final caregiverBucket = _engineActivities.where((a) => a.stakeholder == 'caregiver' && a.weekNumber == currentWeek).toList();
+      for (final row in caregiverBucket) {
+        final req = row.requiredCount <= 0 ? 1 : row.requiredCount;
+        caregiverEngineTotal += req;
+        caregiverEngineDone += row.completedCount > req ? req : row.completedCount;
+      }
+      awwCompletion = _completionPercentForStakeholder('aww', currentWeek);
+      caregiverCompletion = _completionPercentForStakeholder('caregiver', currentWeek);
+      combinedAdherence = _engineCompliancePercent > 0
+          ? _engineCompliancePercent
+          : ((awwCompletion + caregiverCompletion) / 2).round();
+    } else {
+      awwCompletion = awwRows.isEmpty ? 0 : ((awwChecked / awwRows.length) * 100).round();
+      caregiverCompletion = caregiverRows.isEmpty ? 0 : ((caregiverChecked / caregiverRows.length) * 100).round();
+      combinedAdherence = ((awwCompletion + caregiverCompletion + checklistCompletion) / 3).round();
+    }
     final dailyCoreEngineRows = _engineActivities
         .where((a) => a.activityType == 'daily_core' && a.weekNumber == currentWeek)
         .toList();
@@ -1708,8 +1788,18 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
                                       _kv('Follow-up LC delay', '$followupLc months'),
                                       _kv('Improvement', '$lcGain months'),
                                       _kv('Trend', _trend()),
-                                      _kv('AWW task completion', '$awwChecked/${awwRows.length} ($awwCompletion%)'),
-                                      _kv('Caregiver task completion', '$caregiverChecked/${caregiverRows.length} ($caregiverCompletion%)'),
+                                      _kv(
+                                        'AWW task completion',
+                                        _engineActivities.isNotEmpty
+                                            ? '$awwEngineDone/$awwEngineTotal ($awwCompletion%)'
+                                            : '$awwChecked/${awwRows.length} ($awwCompletion%)',
+                                      ),
+                                      _kv(
+                                        'Caregiver task completion',
+                                        _engineActivities.isNotEmpty
+                                            ? '$caregiverEngineDone/$caregiverEngineTotal ($caregiverCompletion%)'
+                                            : '$caregiverChecked/${caregiverRows.length} ($caregiverCompletion%)',
+                                      ),
                                       _kv('Checklist completion', '$checklistChecked/$checklistTotal ($checklistCompletion%)'),
                                       _kv('Combined adherence', '$combinedAdherence%'),
                                       _kv('Projected effect', projectedOutcome),
