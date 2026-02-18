@@ -175,6 +175,19 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
     }
   }
 
+  int _riskBonus(String risk, {required int high, required int moderate}) {
+    final r = risk.trim().toLowerCase();
+    if (r == 'high' || r == 'critical') return high;
+    if (r == 'medium' || r == 'moderate') return moderate;
+    return 0;
+  }
+
+  String _baselineCategoryFromScore(int score) {
+    if (score <= 10) return 'Low';
+    if (score <= 25) return 'Medium';
+    return 'High';
+  }
+
   _RiskCalc _computeRisk(List<NeuroQuestion> questions, Map<int, int> answers) {
     var weightedScore = 0.0;
     var maxScore = 0.0;
@@ -357,6 +370,13 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
       'BPS_BEH': _riskLabelFromCode(behaviorCalc.code),
     };
 
+    final delayCount = widget.delaySummary?['num_delays'] ?? 0;
+    final autismBonus = _riskBonus(_riskLabelFromCode(autismCalc.code), high: 15, moderate: 8);
+    final adhdBonus = _riskBonus(_riskLabelFromCode(adhdCalc.code), high: 8, moderate: 4);
+    final behaviorBonus = _riskBonus(_riskLabelFromCode(behaviorCalc.code), high: 7, moderate: 0);
+    final baselineScore = delayCount * 5 + autismBonus + adhdBonus + behaviorBonus;
+    final baselineCategory = _baselineCategoryFromScore(baselineScore);
+
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => BehavioralPsychosocialSummaryScreen(
@@ -369,8 +389,8 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
           autismRisk: _riskLabelFromCode(autismCalc.code),
           adhdRisk: _riskLabelFromCode(adhdCalc.code),
           behaviorRisk: _riskLabelFromCode(behaviorCalc.code),
-          baselineScore: autismCalc.code + adhdCalc.code + behaviorCalc.code,
-          baselineCategory: _riskLabelFromCode(worstCode),
+          baselineScore: baselineScore,
+          baselineCategory: baselineCategory,
           immunizationStatus: 'unknown',
           weightKg: weight,
           heightCm: height,
@@ -399,6 +419,10 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
       appBar: AppBar(
         title: Text(l10n.t('behavioural_psychosocial_screen_title')),
         backgroundColor: const Color(0xFF0D5BA7),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.of(context).maybePop(),
+        ),
       ),
       body: Column(
         children: [

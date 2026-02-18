@@ -15,6 +15,7 @@ import 'package:my_first_app/screens/referral_details_screen.dart';
 import 'package:my_first_app/screens/result_screen.dart';
 import 'package:my_first_app/screens/behavioral_psychosocial_screen.dart';
 import 'package:my_first_app/screens/settings_screen.dart';
+import 'package:my_first_app/screens/behavioral_psychosocial_summary_screen.dart';
 import 'package:my_first_app/services/auth_service.dart';
 import 'package:my_first_app/services/local_db_service.dart';
 import 'package:my_first_app/widgets/language_menu_button.dart';
@@ -38,6 +39,57 @@ class _DashboardScreenState extends State<DashboardScreen> with RouteAware {
     final width = MediaQuery.of(context).size.width;
     final scale = width / 390.0;
     return scale.clamp(0.88, 1.08);
+  }
+
+  void _openBehavioralSummaryShortcut() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => BehavioralPsychosocialSummaryScreen(
+          childId: 'demo_child',
+          awwId: 'demo_aww',
+          ageMonths: 36,
+          genderLabel: 'Unknown',
+          awcCode: 'DEMO_AWC',
+          overallRisk: 'low',
+          autismRisk: 'low',
+          adhdRisk: 'low',
+          behaviorRisk: 'low',
+          baselineScore: 0,
+          baselineCategory: 'Low',
+          immunizationStatus: 'full',
+          weightKg: 0,
+          heightCm: 0,
+          muacCm: null,
+          birthWeightKg: null,
+          hemoglobin: null,
+          illnessHistory: '',
+          domainScores: const {
+            'GM': 0,
+            'FM': 0,
+            'LC': 0,
+            'COG': 0,
+            'SE': 0,
+          },
+          domainRiskLevels: const {
+            'GM': 'Low',
+            'FM': 'Low',
+            'LC': 'Low',
+            'COG': 'Low',
+            'SE': 'Low',
+          },
+          missedMilestones: 0,
+          explainability: '',
+          delaySummary: const {
+            'GM_delay': 0,
+            'FM_delay': 0,
+            'LC_delay': 0,
+            'COG_delay': 0,
+            'SE_delay': 0,
+            'num_delays': 0,
+          },
+        ),
+      ),
+    );
   }
 
   @override
@@ -688,6 +740,7 @@ class _DashboardScreenState extends State<DashboardScreen> with RouteAware {
                     _actionTile(color: const Color(0xFF2EA0F3), icon: Icons.groups, label: AppLocalizations.of(context).t('view_registered_children'), onTap: _viewRegisteredChildren, s: s),
                     _actionTile(color: const Color(0xFFF6C414), icon: Icons.assignment_rounded, textColor: Colors.black87, label: AppLocalizations.of(context).t('start_screening'), onTap: _startScreening, s: s),
                     _actionTile(color: const Color(0xFF8E6CF6), icon: Icons.psychology, label: AppLocalizations.of(context).t('behavioural_psychosocial_shortcut'), onTap: _startBehaviouralPsychosocial, s: s),
+                    _actionTile(color: const Color(0xFF1E88E5), icon: Icons.assessment, label: 'Behavior Summary', onTap: _openBehavioralSummaryShortcut, s: s),
                     _actionTile(color: const Color(0xFFF35A52), icon: Icons.show_chart, label: AppLocalizations.of(context).t('view_past_results'), onTap: _viewPastResults, s: s),
                     _actionTile(color: const Color(0xFF26A69A), icon: Icons.assignment_turned_in, label: AppLocalizations.of(context).t('referral_batch_summary_shortcut'), onTap: _openReferralBatchSummary, s: s),
                     if (!isWide)

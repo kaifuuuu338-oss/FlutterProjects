@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:my_first_app/core/localization/app_localizations.dart';
 import 'package:my_first_app/screens/result_screen.dart';
+import 'package:my_first_app/screens/baseline_risk_score_screen.dart';
 import 'package:my_first_app/core/utils/delay_summary.dart';
 
 class BehavioralPsychosocialSummaryScreen extends StatelessWidget {
@@ -70,6 +71,10 @@ class BehavioralPsychosocialSummaryScreen extends StatelessWidget {
         title: Text(l10n.t('behavioural_psychosocial_summary_title')),
         backgroundColor: const Color(0xFF0D5BA7),
         foregroundColor: Colors.white,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.of(context).maybePop(),
+        ),
       ),
       body: ListView(
         padding: const EdgeInsets.all(14),
@@ -106,6 +111,23 @@ class BehavioralPsychosocialSummaryScreen extends StatelessWidget {
           _sectionCard(
             title: l10n.t('baseline_risk_scoring'),
             icon: Icons.analytics_outlined,
+            trailing: TextButton(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => BaselineRiskScoreScreen(
+                      autismRisk: autismRisk,
+                      adhdRisk: adhdRisk,
+                      behaviorRisk: behaviorRisk,
+                      delaySummary: delaySummary,
+                      domainScores: domainScores,
+                      domainRiskLevels: domainRiskLevels,
+                    ),
+                  ),
+                );
+              },
+              child: Text(l10n.t('view_details')),
+            ),
             child: Row(
               children: [
                 Expanded(
