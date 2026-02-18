@@ -9,13 +9,24 @@
   <div class="results-grid">
     <div class="results-card">
       <div class="results-title">Overall Risk</div>
-      <div class="results-value">Pending</div>
-      <div class="results-sub">Submit a screening to populate results.</div>
+      {% if has_data %}
+        <div class="results-value">{{ overall_risk }}</div>
+        <div class="results-sub">{{ child_name }} · {{ age_months }} months</div>
+      {% else %}
+        <div class="results-value">Pending</div>
+        <div class="results-sub">Submit a screening to populate results.</div>
+      {% endif %}
     </div>
     <div class="results-card">
       <div class="results-title">Domain Highlights</div>
-      <div class="results-sub">GM · FM · LC · COG · SE</div>
-      <div class="results-meta">Weighted scoring and sigmoid thresholding applied.</div>
+      {% if has_data %}
+        {% for row in domain_scores %}
+          <div class="results-sub">{{ row.domain }} · {{ row.risk_label }} ({{ row.probability|floatformat:2 }})</div>
+        {% endfor %}
+      {% else %}
+        <div class="results-sub">GM · FM · LC · COG · SE</div>
+        <div class="results-meta">Weighted scoring and sigmoid thresholding applied.</div>
+      {% endif %}
     </div>
   </div>
   <div class="results-actions">

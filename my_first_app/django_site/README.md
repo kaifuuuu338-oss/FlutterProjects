@@ -22,3 +22,14 @@ python manage.py runserver
 Next steps:
 - Implement `core/services.py` endpoints to match your FastAPI routes.
 - Replace template placeholders with the production UI.
+
+Problem C/D routes added:
+- `/monitoring/` Role-based decision support dashboard (Problem C)
+- `/impact/` Longitudinal impact dashboard (Problem D)
+- `/api/monitoring/?role=state&location_id=` JSON KPI payload
+
+After pulling updates, run:
+
+```bash
+python manage.py migrate
+```

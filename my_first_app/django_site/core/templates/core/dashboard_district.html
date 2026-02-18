@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+{% block title %}District Dashboard{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="section-header"><h2>{{ title }}</h2><span class="tag">Role: District Officer</span></div>
+  <form class="filter-row" method="get">
+    <label>District ID<input type="text" name="location_id" value="{{ location_id }}" placeholder="DISTRICT001"></label>
+    <button class="btn primary" type="submit">Apply</button>
+  </form>
+  {% if alerts %}
+    <div class="alerts-wrap">{% for a in alerts %}<div class="alert-line">{{ a.level|upper }}: {{ a.message }}</div>{% endfor %}</div>
+  {% endif %}
+  <div class="stat-grid">
+    <div class="stat-card"><div><div class="stat-value">{{ total_children }}</div><div class="stat-label">District Children</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ screening_coverage }}%</div><div class="stat-label">Coverage</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ high_risk_children }}</div><div class="stat-label">High/Critical</div></div></div>
+    <div class="stat-card"><div><div class="stat-value">{{ referral_completion }}%</div><div class="stat-label">Referral Completion</div></div></div>
+  </div>
+</section>
+<section class="section">
+  <div class="section-header"><h2>Risk Distribution</h2></div>
+  <div class="table-wrap">
+    <table class="kpi-table">
+      <thead><tr><th>Low</th><th>Medium</th><th>High</th><th>Critical</th></tr></thead>
+      <tbody><tr><td>{{ risk_distribution.Low|default:0 }}</td><td>{{ risk_distribution.Medium|default:0 }}</td><td>{{ risk_distribution.High|default:0 }}</td><td>{{ risk_distribution.Critical|default:0 }}</td></tr></tbody>
+    </table>
+  </div>
+</section>
+<section class="section">
+  <div class="section-header"><h2>Domain Burden (High/Critical)</h2></div>
+  <div class="table-wrap">
+    <table class="kpi-table">
+      <thead><tr><th>GM</th><th>FM</th><th>LC</th><th>COG</th><th>SE</th></tr></thead>
+      <tbody><tr><td>{{ domain_burden.GM|default:0 }}</td><td>{{ domain_burden.FM|default:0 }}</td><td>{{ domain_burden.LC|default:0 }}</td><td>{{ domain_burden.COG|default:0 }}</td><td>{{ domain_burden.SE|default:0 }}</td></tr></tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

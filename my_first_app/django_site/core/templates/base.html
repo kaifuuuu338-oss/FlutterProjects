@@ -26,6 +26,12 @@
                 <a href="/" class="nav-link">Dashboard</a>
                 <a href="/screening/" class="nav-link">Screening</a>
                 <a href="/results/" class="nav-link">Results</a>
+                <a href="/monitoring/aww/" class="nav-link">AWW</a>
+                <a href="/monitoring/supervisor/" class="nav-link">Supervisor</a>
+                <a href="/monitoring/cdpo/" class="nav-link">CDPO</a>
+                <a href="/monitoring/district/" class="nav-link">District</a>
+                <a href="/monitoring/state/" class="nav-link">State</a>
+                <a href="/impact/" class="nav-link">Problem D</a>
                 {% if user.is_authenticated %}
                     <span class="nav-pill">Hi, {{ user.username }}</span>
                     <a href="{% url 'core:logout' %}" class="nav-link">Logout</a>
