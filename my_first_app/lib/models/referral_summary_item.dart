@@ -6,6 +6,7 @@ class ReferralSummaryItem {
   final String overallRisk;
   final String referralType;
   final String urgency;
+  final String status;
   final DateTime createdAt;
   final DateTime expectedFollowUpDate;
   final String? notes;
@@ -19,6 +20,7 @@ class ReferralSummaryItem {
     required this.overallRisk,
     required this.referralType,
     required this.urgency,
+    this.status = 'pending',
     required this.createdAt,
     required this.expectedFollowUpDate,
     required this.reasons,

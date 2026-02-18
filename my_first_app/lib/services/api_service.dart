@@ -93,7 +93,6 @@ class APIService {
       );
       return response.data as Map<String, dynamic>;
     } on DioException catch (e) {
-      print('API Error: $e');
       throw Exception('Screening submission failed: ${e.message}');
     }
   }
@@ -106,7 +105,6 @@ class APIService {
       );
       return response.data as Map<String, dynamic>;
     } on DioException catch (e) {
-      print('API Error: $e');
       throw Exception('Failed to fetch child details: ${e.message}');
     }
   }
@@ -120,8 +118,72 @@ class APIService {
       );
       return response.data as Map<String, dynamic>;
     } on DioException catch (e) {
-      print('API Error: $e');
       throw Exception('Referral creation failed: ${e.message}');
+    }
+  }
+
+  Future<Map<String, dynamic>> generateProblemBInterventionPlan(Map<String, dynamic> payload) async {
+    try {
+      final response = await _dio.post('/problem-b/intervention-plan', data: payload);
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw Exception('Problem B intervention generation failed: ${e.message}');
+    }
+  }
+
+  Future<Map<String, dynamic>> getProblemBTrend({
+    required int baselineDelay,
+    required int followupDelay,
+  }) async {
+    try {
+      final response = await _dio.post(
+        '/problem-b/trend',
+        data: {
+          'baseline_delay': baselineDelay,
+          'followup_delay': followupDelay,
+        },
+      );
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw Exception('Problem B trend calculation failed: ${e.message}');
+    }
+  }
+
+  Future<Map<String, dynamic>> adjustProblemBIntensity({
+    required String currentIntensity,
+    required String trend,
+    required int delayReduction,
+  }) async {
+    try {
+      final response = await _dio.post(
+        '/problem-b/adjust-intensity',
+        data: {
+          'current_intensity': currentIntensity,
+          'trend': trend,
+          'delay_reduction': delayReduction,
+        },
+      );
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw Exception('Problem B intensity adjustment failed: ${e.message}');
+    }
+  }
+
+  Future<Map<String, dynamic>> getProblemBRules() async {
+    try {
+      final response = await _dio.get('/problem-b/rules');
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw Exception('Problem B rules fetch failed: ${e.message}');
+    }
+  }
+
+  Future<Map<String, dynamic>> getProblemBSchema() async {
+    try {
+      final response = await _dio.get('/problem-b/schema');
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw Exception('Problem B schema fetch failed: ${e.message}');
     }
   }
 
