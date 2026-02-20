@@ -193,6 +193,27 @@ def _init_db(db_path: str) -> None:
               followup_completed INTEGER,
               followup_date TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS follow_up_activities (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              referral_id TEXT,
+              target_user TEXT,
+              domain TEXT,
+              activity_title TEXT,
+              activity_description TEXT,
+              frequency TEXT,
+              duration_days INTEGER,
+              created_on TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS follow_up_log (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              referral_id TEXT,
+              activity_id INTEGER,
+              completed INTEGER DEFAULT 0,
+              completed_on TEXT,
+              remarks TEXT
+            );
             """
         )
         cols = [r["name"] for r in conn.execute("PRAGMA table_info(referral_action)").fetchall()]
@@ -914,6 +935,148 @@ def _compute_impact(db_path: str, role: str, location_id: str) -> dict:
     }
 
 
+def _generate_follow_up_activities(db_path: str, referral_id: str, child_id: str, risk_level: str, domain_scores: Dict[str, str], autism_risk: str = "Low", nutrition_risk: str = "Low") -> List[Dict]:
+    """Generate domain-specific home activities based on referral risk profile."""
+    activities = []
+    activity_id = 1
+
+    # Extract delay information from domain scores
+    delayed_domains = []
+    for domain, risk in domain_scores.items():
+        domain_upper = str(domain).upper().strip()
+        if domain_upper in {"GM", "FM", "LC", "COG", "SE"}:
+            risk_normalized = _normalize_risk(str(risk))
+            if risk_normalized in {"High", "Critical", "Medium"}:
+                delayed_domains.append(domain_upper)
+
+    # Rule 1: Gross Motor Delay → Daily floor play activities
+    if "GM" in delayed_domains:
+        activities.append({
+            "id": activity_id,
+            "referral_id": referral_id,
+            "target_user": "CAREGIVER",
+            "domain": "GM",
+            "activity_title": "Daily Floor Play & Standing Support",
+            "activity_description": "Encourage crawling and standing with support. Let child practice weight-shifting. 20-30 mins daily.",
+            "frequency": "DAILY",
+            "duration_days": 30,
+            "created_on": datetime.utcnow().date().isoformat(),
+        })
+        activity_id += 1
+
+        # Add AWW monitoring activity
+        activities.append({
+            "id": activity_id,
+            "referral_id": referral_id,
+            "target_user": "AWW",
+            "domain": "GM",
+            "activity_title": "Weekly Motor Development Check",
+            "activity_description": "Observe and assess child's motor milestones. Document progress. Counsel caregiver.",
+            "frequency": "WEEKLY",
+            "duration_days": 30,
+            "created_on": datetime.utcnow().date().isoformat(),
+        })
+        activity_id += 1
+
+    # Rule 2: Fine Motor Delay → Hand activities
+    if "FM" in delayed_domains:
+        activities.append({
+            "id": activity_id,
+            "referral_id": referral_id,
+            "target_user": "CAREGIVER",
+            "domain": "FM",
+            "activity_title": "Hand & Finger Exercises",
+            "activity_description": "Practice grasping, finger play, and self-feeding. Use household items (spoons, balls). 15 mins daily.",
+            "frequency": "DAILY",
+            "duration_days": 30,
+            "created_on": datetime.utcnow().date().isoformat(),
+        })
+        activity_id += 1
+
+    # Rule 3: Language & Communication Delay → Speech activities
+    if "LC" in delayed_domains:
+        activities.append({
+            "id": activity_id,
+            "referral_id": referral_id,
+            "target_user": "CAREGIVER",
+            "domain": "LC",
+            "activity_title": "Language Stimulation Activities",
+            "activity_description": "Talk to child, name objects, sing songs. Encourage babbling and word repetition. 20 mins daily.",
+            "frequency": "DAILY",
+            "duration_days": 30,
+            "created_on": datetime.utcnow().date().isoformat(),
+        })
+        activity_id += 1
+
+    # Rule 4: Cognitive Delay → Problem-solving activities
+    if "COG" in delayed_domains:
+        activities.append({
+            "id": activity_id,
+            "referral_id": referral_id,
+            "target_user": "CAREGIVER",
+            "domain": "COG",
+            "activity_title": "Cognitive Play & Problem Solving",
+            "activity_description": "Hide-and-seek games, shape sorting, stacking toys. Encourage exploration and discovery. 20 mins daily.",
+            "frequency": "DAILY",
+            "duration_days": 30,
+            "created_on": datetime.utcnow().date().isoformat(),
+        })
+        activity_id += 1
+
+    # Rule 5: Social-Emotional Delay → Interaction activities
+    if "SE" in delayed_domains or autism_risk in {"Moderate", "High"}:
+        activities.append({
+            "id": activity_id,
+            "referral_id": referral_id,
+            "target_user": "CAREGIVER",
+            "domain": "SE",
+            "activity_title": "Social Interaction & Eye Contact Practice",
+            "activity_description": "Call child's name, maintain eye contact during play. Practice greeting gestures. 10-15 mins, 3x daily.",
+            "frequency": "DAILY",
+            "duration_days": 30,
+            "created_on": datetime.utcnow().date().isoformat(),
+        })
+        activity_id += 1
+
+    # Rule 6: Nutrition Risk → Feeding guidance
+    if nutrition_risk in {"High", "Severe", "Critical"}:
+        activities.append({
+            "id": activity_id,
+            "referral_id": referral_id,
+            "target_user": "AWW",
+            "domain": "Nutrition",
+            "activity_title": "Weekly Weight Monitoring & Nutrition Counseling",
+            "activity_description": "Check child's weight weekly. Monitor growth. Counsel caregiver on nutrition, fortified foods, supplementation.",
+            "frequency": "WEEKLY",
+            "duration_days": 30,
+            "created_on": datetime.utcnow().date().isoformat(),
+        })
+        activity_id += 1
+
+    # Save activities to database
+    with _get_conn(db_path) as conn:
+        for activity in activities:
+            conn.execute(
+                """
+                INSERT INTO follow_up_activities (
+                    referral_id, target_user, domain, activity_title,
+                    activity_description, frequency, duration_days, created_on
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    activity["referral_id"],
+                    activity["target_user"],
+                    activity["domain"],
+                    activity["activity_title"],
+                    activity["activity_description"],
+                    activity["frequency"],
+                    activity["duration_days"],
+                    activity["created_on"],
+                ),
+            )
+    return activities
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="ECD AI Backend", version="1.0.0")
 
@@ -1122,6 +1285,22 @@ def create_app() -> FastAPI:
                     created_on.isoformat(),
                 ),
             )
+        
+        # Generate follow-up activities based on risk profile
+        domain_scores_dict = getattr(payload, 'domain_scores', {})
+        if not isinstance(domain_scores_dict, dict):
+            domain_scores_dict = {}
+        
+        _generate_follow_up_activities(
+            db_path,
+            referral_id=referral_id,
+            child_id=payload.child_id,
+            risk_level=payload.overall_risk,
+            domain_scores=domain_scores_dict,
+            autism_risk=getattr(payload, 'autism_risk', 'Low'),
+            nutrition_risk=getattr(payload, 'nutrition_risk', 'Low'),
+        )
+        
         return response
 
     @app.get("/referral/by-child/{child_id}")
@@ -1729,6 +1908,250 @@ def create_app() -> FastAPI:
             "escalation_level": level,
             "escalated_to": escalated_to,
             "followup_deadline": new_deadline,
+        }
+
+    @app.get("/referral/{referral_id}/history")
+    def get_referral_history(referral_id: str):
+        with _get_conn(db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT id, referral_id, old_status, new_status, changed_on, worker_id
+                FROM referral_status_history
+                WHERE referral_id = ?
+                ORDER BY changed_on DESC, id DESC
+                """,
+                (referral_id,),
+            ).fetchall()
+        history = [
+            {
+                "id": r["id"],
+                "referral_id": r["referral_id"],
+                "old_status": _status_to_frontend(r["old_status"]),
+                "new_status": _status_to_frontend(r["new_status"]),
+                "changed_on": r["changed_on"],
+                "worker_id": r["worker_id"],
+            }
+            for r in rows
+        ]
+        return {"referral_id": referral_id, "history": history}
+
+    # ============================================================================
+    # Problem B: Follow-Up Tracking Endpoints
+    # ============================================================================
+
+    @app.get("/follow-up/{referral_id}")
+    def get_follow_up_page(referral_id: str):
+        """Get complete follow-up page data: referral summary + activities"""
+        with _get_conn(db_path) as conn:
+            # Get referral details
+            referral = conn.execute(
+                """
+                SELECT referral_id, child_id, aww_id, referral_type, urgency,
+                       referral_status, referral_date, followup_deadline,
+                       escalation_level, escalated_to
+                FROM referral_action
+                WHERE referral_id = ?
+                """,
+                (referral_id,),
+            ).fetchone()
+
+            if referral is None:
+                raise HTTPException(status_code=404, detail="Referral not found")
+
+            # Get follow-up activities
+            activities = conn.execute(
+                """
+                SELECT id, referral_id, target_user, domain, activity_title,
+                       activity_description, frequency, duration_days, created_on
+                FROM follow_up_activities
+                WHERE referral_id = ?
+                ORDER BY target_user, domain
+                """,
+                (referral_id,),
+            ).fetchall()
+
+            # Get activity completion logs
+            activity_logs = conn.execute(
+                """
+                SELECT activity_id, completed, completed_on, remarks
+                FROM follow_up_log
+                WHERE referral_id = ?
+                ORDER BY completed_on DESC
+                """,
+                (referral_id,),
+            ).fetchall()
+
+        # Build activity completion map
+        log_map = {int(log["activity_id"]): log for log in activity_logs}
+
+        # Format response
+        formatted_activities = []
+        for act in activities:
+            log = log_map.get(act["id"], {})
+            formatted_activities.append({
+                "id": act["id"],
+                "target_user": act["target_user"],
+                "domain": act["domain"],
+                "title": act["activity_title"],
+                "description": act["activity_description"],
+                "frequency": act["frequency"],
+                "duration_days": act["duration_days"],
+                "completed": log.get("completed", 0) == 1,
+                "completed_on": log.get("completed_on"),
+                "remarks": log.get("remarks"),
+            })
+
+        # Determine days to deadline
+        deadline = _parse_date_safe(referral["followup_deadline"])
+        today = datetime.utcnow().date()
+        days_remaining = (deadline - today).days if deadline else 0
+        is_overdue = days_remaining < 0 and _status_to_frontend(referral["referral_status"]) != "COMPLETED"
+
+        return {
+            "referral_id": referral_id,
+            "child_id": referral["child_id"],
+            "facility": referral["referral_type"],
+            "urgency": referral["urgency"],
+            "status": _status_to_frontend(referral["referral_status"]),
+            "created_on": referral["referral_date"],
+            "deadline": referral["followup_deadline"],
+            "days_remaining": days_remaining,
+            "is_overdue": is_overdue,
+            "escalation_level": referral["escalation_level"],
+            "escalated_to": referral["escalated_to"],
+            "activities": formatted_activities,
+            "total_activities": len(formatted_activities),
+            "completed_activities": sum(1 for a in formatted_activities if a["completed"]),
+        }
+
+    class CompleteActivityRequest(BaseModel):
+        remarks: Optional[str] = None
+
+    @app.post("/follow-up/{referral_id}/activity/{activity_id}/complete")
+    def complete_activity(referral_id: str, activity_id: int, payload: CompleteActivityRequest):
+        """Mark an activity as completed"""
+        today = datetime.utcnow().date().isoformat()
+
+        with _get_conn(db_path) as conn:
+            # Verify activity exists
+            activity = conn.execute(
+                """
+                SELECT id FROM follow_up_activities
+                WHERE id = ? AND referral_id = ?
+                """,
+                (activity_id, referral_id),
+            ).fetchone()
+
+            if activity is None:
+                raise HTTPException(status_code=404, detail="Activity not found")
+
+            # Insert completion log
+            conn.execute(
+                """
+                INSERT INTO follow_up_log (
+                    referral_id, activity_id, completed, completed_on, remarks
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (referral_id, activity_id, 1, today, payload.remarks or ""),
+            )
+
+        return {
+            "status": "ok",
+            "activity_id": activity_id,
+            "completed_on": today,
+        }
+
+    @app.get("/follow-up/{referral_id}/progress")
+    def get_follow_up_progress(referral_id: str):
+        """Get follow-up completion progress"""
+        with _get_conn(db_path) as conn:
+            # Count total activities
+            total = conn.execute(
+                """
+                SELECT COUNT(*) as cnt FROM follow_up_activities
+                WHERE referral_id = ?
+                """,
+                (referral_id,),
+            ).fetchone()["cnt"]
+
+            # Count completed activities
+            completed = conn.execute(
+                """
+                SELECT COUNT(DISTINCT activity_id) as cnt FROM follow_up_log
+                WHERE referral_id = ? AND completed = 1
+                """,
+                (referral_id,),
+            ).fetchone()["cnt"]
+
+        completion_percent = int((completed / total * 100) if total > 0 else 0)
+
+        return {
+            "referral_id": referral_id,
+            "total_activities": total,
+            "completed_activities": completed,
+            "completion_percent": completion_percent,
+        }
+
+    @app.post("/follow-up/auto-escalate-overdue")
+    def auto_escalate_overdue():
+        """Auto-escalate all overdue referrals that haven't been completed"""
+        today = datetime.utcnow().date()
+        escalated_count = 0
+
+        with _get_conn(db_path) as conn:
+            # Find all overdue referrals
+            overdue = conn.execute(
+                """
+                SELECT referral_id, escalation_level, referral_status
+                FROM referral_action
+                WHERE followup_deadline < ? AND referral_status != 'Completed'
+                """,
+                (today.isoformat(),),
+            ).fetchall()
+
+            for referral in overdue:
+                referral_id = referral["referral_id"]
+                current_level = int(referral["escalation_level"] or 0)
+                new_level = current_level + 1
+                escalated_to = _escalation_target(new_level)
+                new_deadline = (today + timedelta(days=2)).isoformat()
+
+                # Update referral
+                conn.execute(
+                    """
+                    UPDATE referral_action
+                    SET escalation_level = ?,
+                        escalated_to = ?,
+                        followup_deadline = ?,
+                        last_updated = ?
+                    WHERE referral_id = ?
+                    """,
+                    (new_level, escalated_to, new_deadline, today.isoformat(), referral_id),
+                )
+
+                # Log in status history
+                conn.execute(
+                    """
+                    INSERT INTO referral_status_history (
+                        referral_id, old_status, new_status, changed_on, worker_id
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        referral_id,
+                        referral["referral_status"],
+                        "Escalated (Overdue)",
+                        today.isoformat(),
+                        "SYSTEM_AUTO",
+                    ),
+                )
+
+                escalated_count += 1
+
+        return {
+            "status": "ok",
+            "escalated_count": escalated_count,
+            "timestamp": datetime.utcnow().isoformat(),
+            "message": f"Auto-escalated {escalated_count} overdue referral(s)",
         }
 
     class CaregiverEngagementRequest(BaseModel):
