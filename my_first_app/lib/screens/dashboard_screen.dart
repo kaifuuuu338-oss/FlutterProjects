@@ -476,13 +476,16 @@ class _DashboardScreenState extends State<DashboardScreen> with RouteAware {
           final r = referrals[index];
           final meta = r.metadata ?? {};
           final domainKey = meta['domain'] as String?;
-          final domainRisk = meta['domain_risk'] as String?;
+          final domainRisk = (meta['domain_risk'] as String?) ?? (meta['risk_level'] as String?);
           final referralTypeLabel = (meta['referral_type_label'] as String?) ?? r.referralType.toString().split('.').last;
-          final overallRisk = (meta['overall_risk'] as String?) ?? 'low';
+          final overallRisk = (meta['risk_level'] as String?) ?? (meta['overall_risk'] as String?) ?? 'low';
           final ageMonthsValue = meta['age_months'];
           final ageMonths = ageMonthsValue is int ? ageMonthsValue : int.tryParse(ageMonthsValue?.toString() ?? '') ?? 0;
           final reasons = <String>[];
-          if (domainKey != null && domainKey.isNotEmpty) {
+          final domainReason = meta['domain_reason'] as String?;
+          if (domainReason != null && domainReason.isNotEmpty) {
+            reasons.add(domainReason);
+          } else if (domainKey != null && domainKey.isNotEmpty) {
             final domainLabel = _domainLabel(domainKey);
             if (domainRisk != null && domainRisk.isNotEmpty) {
               reasons.add('$domainLabel (${_riskLabel(domainRisk)})');
@@ -561,7 +564,7 @@ class _DashboardScreenState extends State<DashboardScreen> with RouteAware {
     switch (urgency) {
       case ReferralUrgency.immediate:
         return l10n.t('urgency_immediate');
-      case ReferralUrgency.urgent:
+      case ReferralUrgency.priority:
         return l10n.t('urgency_urgent');
       default:
         return l10n.t('urgency_normal');

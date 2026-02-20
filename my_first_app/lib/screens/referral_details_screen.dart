@@ -67,6 +67,10 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
   String _engineEscalationDecision = 'Continue';
   String _engineNextAction = 'Continue_Current_Plan';
   Map<String, dynamic> _enginePlanRegen = <String, dynamic>{};
+  List<_Appointment> _appointments = <_Appointment>[];
+  String _computedReferralStatus = 'Pending';
+  String _suggestedReferralStatus = 'Pending';
+  _Appointment? _nextAppointment;
   DateTime? _caregiverFromDate;
   DateTime? _caregiverToDate;
   DateTime? _awwFromDate;
@@ -100,10 +104,140 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
       if (child.length > 1) _previous = child[1];
       _computeCohort();
       await _loadEngineActivities();
+      await _loadAppointments();
     } catch (_) {
       // Keep view usable even without local records.
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _loadAppointments() async {
+    try {
+      final api = APIService();
+      final response = await api.getReferralAppointments(widget.referralId);
+      final raw = (response['appointments'] as List?) ?? const [];
+      _appointments = raw
+          .whereType<Map>()
+          .map((e) => _Appointment.fromJson(Map<String, dynamic>.from(e)))
+          .toList()
+        ..sort((a, b) => a.scheduledDate.compareTo(b.scheduledDate));
+      _suggestedReferralStatus = response['suggested_status']?.toString() ?? _computeReferralStatusLocal();
+      _computedReferralStatus = response['current_status']?.toString() ?? _computeReferralStatusLocal();
+      final nextRaw = response['next_appointment'];
+      if (nextRaw is Map) {
+        _nextAppointment = _Appointment.fromJson(Map<String, dynamic>.from(nextRaw));
+      } else {
+        _nextAppointment = _appointments.firstWhere(
+          (a) => a.status == 'SCHEDULED',
+          orElse: () => _appointments.isEmpty ? _Appointment.empty() : _appointments.first,
+        );
+      }
+    } catch (_) {
+      _computedReferralStatus = _computeReferralStatusLocal();
+    }
+  }
+
+  String _computeReferralStatusLocal() {
+    if (_appointments.isEmpty) return 'Pending';
+    final completed = _appointments.where((a) => a.status == 'COMPLETED').length;
+    return completed < _appointments.length ? 'Under Treatment' : 'Completed';
+  }
+
+  Future<void> _setReferralStatus(String status) async {
+    try {
+      final api = APIService();
+      final response = await api.updateReferralStatus(referralId: widget.referralId, status: status);
+      _computedReferralStatus = response['current_status']?.toString() ?? status;
+      _suggestedReferralStatus = response['suggested_status']?.toString() ?? _suggestedReferralStatus;
+      if (mounted) setState(() {});
+    } catch (_) {
+      // keep UI usable even if backend is unavailable
+    }
+  }
+
+  Future<void> _createAppointment() async {
+    final types = <String>[
+      'Initial Consultation',
+      'Therapy Session',
+      'Follow-up Review',
+      'Specialist Review',
+    ];
+    var selectedType = types.first;
+    var selectedDate = DateTime.now().add(const Duration(days: 2));
+    final notesController = TextEditingController();
+    final created = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Schedule New Appointment'),
+        content: StatefulBuilder(
+          builder: (context, setInner) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Date'),
+                subtitle: Text(_formatPrettyDate(selectedDate)),
+                trailing: const Icon(Icons.calendar_month_outlined),
+                onTap: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: selectedDate,
+                    firstDate: DateTime.now().subtract(const Duration(days: 1)),
+                    lastDate: DateTime.now().add(const Duration(days: 365)),
+                  );
+                  if (picked != null) {
+                    setInner(() => selectedDate = picked);
+                  }
+                },
+              ),
+              DropdownButtonFormField<String>(
+                initialValue: selectedType,
+                decoration: const InputDecoration(labelText: 'Appointment Type'),
+                items: types.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+                onChanged: (v) {
+                  if (v != null) setInner(() => selectedType = v);
+                },
+              ),
+              TextField(
+                controller: notesController,
+                decoration: const InputDecoration(labelText: 'Notes'),
+                maxLines: 2,
+              ),
+            ],
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (created != true) return;
+    try {
+      final api = APIService();
+      await api.createAppointment(
+        referralId: widget.referralId,
+        childId: widget.childId,
+        scheduledDate: _formatDate(selectedDate),
+        appointmentType: selectedType,
+        notes: notesController.text.trim(),
+      );
+      await _loadAppointments();
+      if (mounted) setState(() {});
+    } catch (_) {
+      // keep UI usable even if backend is unavailable
+    }
+  }
+
+  Future<void> _updateAppointmentStatus(_Appointment appt, String status) async {
+    try {
+      final api = APIService();
+      await api.updateAppointmentStatus(appointmentId: appt.appointmentId, status: status);
+      await _loadAppointments();
+      if (mounted) setState(() {});
+    } catch (_) {
+      // keep UI usable even if backend is unavailable
     }
   }
 
@@ -116,9 +250,11 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
     }
 
   Future<void> _loadEngineActivities() async {
-    if (_latest == null) return;
     final snapshot = _snapshot();
-    final delayed = _activeDomains(snapshot);
+    var delayed = _activeDomains(snapshot);
+    if (delayed.isEmpty) {
+      delayed = _domainsFromReasons(widget.reasons);
+    }
     final autismRisk = ((snapshot['LC'] == 'Critical' || snapshot['LC'] == 'High') &&
             (snapshot['SE'] == 'Critical' || snapshot['SE'] == 'High'))
         ? 'High'
@@ -300,13 +436,46 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
   Map<String, String> _snapshot() {
     final out = <String, String>{};
     for (final d in _domains) {
-      out[d] = _statusFromRisk(_riskFromScore(_latest?.domainScores[d]));
+      out[d] = 'Normal';
+    }
+    if (_latest != null) {
+      for (final d in _domains) {
+        out[d] = _statusFromRisk(_riskFromScore(_latest?.domainScores[d]));
+      }
+      return out;
+    }
+    final reasonDomains = _domainsFromReasons(widget.reasons);
+    if (reasonDomains.isEmpty) return out;
+    final reasonText = widget.reasons.join(' ');
+    for (final domain in reasonDomains) {
+      out[domain] = _statusFromReason(reasonText);
     }
     return out;
   }
 
   List<String> _activeDomains(Map<String, String> snapshot) {
     return snapshot.entries.where((e) => e.value != 'Normal').map((e) => e.key).toList();
+  }
+
+  List<String> _domainsFromReasons(List<String> reasons) {
+    final result = <String>{};
+    for (final reason in reasons) {
+      final r = reason.toLowerCase();
+      if (r.contains('gm') || r.contains('gross motor')) result.add('GM');
+      if (r.contains('fm') || r.contains('fine motor')) result.add('FM');
+      if (r.contains('lc') || r.contains('language')) result.add('LC');
+      if (r.contains('cog') || r.contains('cognitive')) result.add('COG');
+      if (r.contains('se') || r.contains('social') || r.contains('emotional')) result.add('SE');
+    }
+    return result.toList();
+  }
+
+  String _statusFromReason(String reasonText) {
+    final r = reasonText.toLowerCase();
+    if (r.contains('critical')) return 'Critical';
+    if (r.contains('high')) return 'High';
+    if (r.contains('mild')) return 'Mild Delay';
+    return 'Mild Delay';
   }
 
   List<String> _centerPlan(String domain) {
@@ -468,11 +637,12 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
   }
 
   String _intensity() {
-    final t = _trend();
-    if (widget.overallRisk.toLowerCase() == 'critical' || t == 'Worsening') {
+    final severity = _engineSeverity.isNotEmpty ? _engineSeverity : widget.overallRisk;
+    final normalized = _normalizedSeverity(severity);
+    if (normalized == 'Critical' || normalized == 'Severe') {
       return 'High - Daily structured stimulation';
     }
-    if (t == 'Improving') return 'Moderate - 3x weekly';
+    if (normalized == 'Moderate') return 'Moderate - 3x weekly';
     return 'Routine - Reinforcement only';
   }
 
@@ -526,26 +696,26 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
   String _expectedImprovementWindow(String severity) {
     switch (_normalizedSeverity(severity)) {
       case 'Critical':
-        return 'Specialist referral + 15-day monitoring';
+        return 'Referral + 15-day monitoring';
       case 'Severe':
-        return '12-16 weeks';
+        return '3-4 months';
       case 'Moderate':
-        return '8-12 weeks';
+        return '2-3 months';
       default:
-        return '6-8 weeks';
+        return '1-2 months';
     }
   }
 
   int _totalWeeksForSeverity(String severity) {
     switch (_normalizedSeverity(severity)) {
       case 'Critical':
-        return 2;
-      case 'Severe':
         return 16;
-      case 'Moderate':
+      case 'Severe':
         return 12;
-      default:
+      case 'Moderate':
         return 8;
+      default:
+        return 6;
     }
   }
 
@@ -591,6 +761,11 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
   }
 
   int _daysSinceReferral() => DateTime.now().difference(widget.createdAt).inDays.clamp(0, 9999);
+
+  bool _isReferralDelayed() {
+    final now = DateTime.now();
+    return now.isAfter(widget.expectedFollowUpDate);
+  }
 
   int _stimulationScore(Map<String, String> snapshot) {
     final delays = snapshot.values.where((v) => v != 'Normal').length;
@@ -667,8 +842,6 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
       case 'under_treatment':
       case 'undertreatment':
         return ReferralStatus.underTreatment;
-      case 'cancelled':
-        return ReferralStatus.cancelled;
       default:
         return ReferralStatus.pending;
     }
@@ -849,6 +1022,20 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
     return _weeklyNote(completion);
   }
 
+  int _completionPercentForStakeholder(String stakeholder, int weekNumber) {
+    final bucket = _engineActivities.where((a) => a.stakeholder == stakeholder && a.weekNumber == weekNumber).toList();
+    if (bucket.isEmpty) return 0;
+    var required = 0;
+    var done = 0;
+    for (final row in bucket) {
+      final req = row.requiredCount <= 0 ? 1 : row.requiredCount;
+      required += req;
+      final completed = row.completedCount > req ? req : row.completedCount;
+      done += completed;
+    }
+    return ((done / (required == 0 ? 1 : required)) * 100).round();
+  }
+
   Widget _engineTable({
     required String title,
     required List<_EngineActivity> rows,
@@ -891,6 +1078,76 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
                         .toList(),
                   ),
                 ),
+    );
+  }
+
+  Widget _appointmentsCard() {
+    final hasNext = _nextAppointment != null && _nextAppointment!.appointmentId.isNotEmpty;
+    return _sectionCard(
+      'Appointments',
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              ElevatedButton.icon(
+                onPressed: _createAppointment,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Schedule New Appointment'),
+              ),
+              const SizedBox(width: 12),
+              if (hasNext)
+                Text(
+                  'Next: ${_formatPrettyDate(_nextAppointment!.scheduledDate)} (${_nextAppointment!.appointmentType})',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _appointments.isEmpty
+              ? const Text('No appointments scheduled yet.')
+              : SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: DataTable(
+                    columnSpacing: 18,
+                    columns: const <DataColumn>[
+                      DataColumn(label: Text('Date')),
+                      DataColumn(label: Text('Type')),
+                      DataColumn(label: Text('Status')),
+                      DataColumn(label: Text('Action')),
+                    ],
+                    rows: _appointments
+                        .map(
+                          (appt) => DataRow(
+                            cells: <DataCell>[
+                              DataCell(Text(_formatPrettyDate(appt.scheduledDate))),
+                              DataCell(Text(appt.appointmentType)),
+                              DataCell(Text(appt.status)),
+                              DataCell(
+                                DropdownButton<String>(
+                                  value: appt.status,
+                                  items: const <String>[
+                                    'SCHEDULED',
+                                    'COMPLETED',
+                                    'CANCELLED',
+                                    'RESCHEDULED',
+                                    'MISSED',
+                                  ]
+                                      .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                                      .toList(),
+                                  onChanged: (v) {
+                                    if (v != null) _updateAppointmentStatus(appt, v);
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ),
+        ],
+      ),
     );
   }
 
@@ -1274,7 +1531,10 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
     final l10n = AppLocalizations.of(context);
     final isWide = MediaQuery.of(context).size.width >= 900;
     final snapshot = _snapshot();
-    final activeDomains = _activeDomains(snapshot);
+    var activeDomains = _activeDomains(snapshot);
+    if (activeDomains.isEmpty) {
+      activeDomains = _domainsFromReasons(widget.reasons);
+    }
     final awwRows = activeDomains.expand(_awwTasksForDomain).toList();
     final caregiverRows = activeDomains.expand(_caregiverTasksForDomain).toList();
     final awwDailyRows = _engineBy(stakeholder: 'aww', frequencyType: 'daily');
@@ -1295,16 +1555,44 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
     final expectedWindow = _engineExpectedWindow.isNotEmpty ? _engineExpectedWindow : _expectedImprovementWindow(phaseSeverity);
     final targetMilestone = _engineTargetMilestone.isNotEmpty ? _engineTargetMilestone : _targetMilestone(activeDomains);
     final phaseReviewDays = _engineReviewCycleDays > 0 ? _engineReviewCycleDays : _reviewDaysForSeverity(phaseSeverity);
+    final referralStatus = _appointments.isEmpty ? _referralStatus() : _computedReferralStatus;
     final currentWeek = _phaseCurrentWeek(phaseWeeks);
     _ensureTaskState(awwRows, caregiverRows);
     final awwChecked = _checkedCount(_awwTaskChecks, awwRows);
     final caregiverChecked = _checkedCount(_caregiverTaskChecks, caregiverRows);
     final checklistChecked = _awwChecklist.values.where((v) => v).length;
     final checklistTotal = _awwChecklist.length;
-    final awwCompletion = awwRows.isEmpty ? 0 : ((awwChecked / awwRows.length) * 100).round();
-    final caregiverCompletion = caregiverRows.isEmpty ? 0 : ((caregiverChecked / caregiverRows.length) * 100).round();
     final checklistCompletion = checklistTotal == 0 ? 0 : ((checklistChecked / checklistTotal) * 100).round();
-    final combinedAdherence = ((awwCompletion + caregiverCompletion + checklistCompletion + _engineCompliancePercent) / 4).round();
+    int awwCompletion;
+    int caregiverCompletion;
+    int combinedAdherence;
+    var awwEngineTotal = 0;
+    var awwEngineDone = 0;
+    var caregiverEngineTotal = 0;
+    var caregiverEngineDone = 0;
+    if (_engineActivities.isNotEmpty) {
+      final awwBucket = _engineActivities.where((a) => a.stakeholder == 'aww' && a.weekNumber == currentWeek).toList();
+      for (final row in awwBucket) {
+        final req = row.requiredCount <= 0 ? 1 : row.requiredCount;
+        awwEngineTotal += req;
+        awwEngineDone += row.completedCount > req ? req : row.completedCount;
+      }
+      final caregiverBucket = _engineActivities.where((a) => a.stakeholder == 'caregiver' && a.weekNumber == currentWeek).toList();
+      for (final row in caregiverBucket) {
+        final req = row.requiredCount <= 0 ? 1 : row.requiredCount;
+        caregiverEngineTotal += req;
+        caregiverEngineDone += row.completedCount > req ? req : row.completedCount;
+      }
+      awwCompletion = _completionPercentForStakeholder('aww', currentWeek);
+      caregiverCompletion = _completionPercentForStakeholder('caregiver', currentWeek);
+      combinedAdherence = _engineCompliancePercent > 0
+          ? _engineCompliancePercent
+          : ((awwCompletion + caregiverCompletion) / 2).round();
+    } else {
+      awwCompletion = awwRows.isEmpty ? 0 : ((awwChecked / awwRows.length) * 100).round();
+      caregiverCompletion = caregiverRows.isEmpty ? 0 : ((caregiverChecked / caregiverRows.length) * 100).round();
+      combinedAdherence = ((awwCompletion + caregiverCompletion + checklistCompletion) / 3).round();
+    }
     final dailyCoreEngineRows = _engineActivities
         .where((a) => a.activityType == 'daily_core' && a.weekNumber == currentWeek)
         .toList();
@@ -1387,24 +1675,72 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
                                           _infoTile(l10n.t('child_id'), widget.childId),
                                           _infoTile(l10n.t('referral_type'), widget.referralType),
                                           _infoTile(l10n.t('urgency'), widget.urgency),
-                                          _infoTile('Referral Status', _referralStatus()),
+                                          _infoTile('Referral Status', referralStatus),
                                           _infoTile(l10n.t('created_on'), _formatDate(widget.createdAt)),
                                           _infoTile(l10n.t('follow_up_by'), _formatDate(widget.expectedFollowUpDate)),
                                           _infoTile('Days Since Referral', '${_daysSinceReferral()}'),
                                         ],
                                       ),
+                                      if (_isReferralDelayed())
+                                        Container(
+                                          margin: const EdgeInsets.only(top: 8),
+                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFFFFF3E0),
+                                            borderRadius: BorderRadius.circular(10),
+                                            border: Border.all(color: const Color(0xFFFFB74D)),
+                                          ),
+                                          child: Row(
+                                            children: <Widget>[
+                                              const Icon(Icons.warning_amber_rounded, color: Color(0xFFF57C00)),
+                                              const SizedBox(width: 8),
+                                              Expanded(
+                                                child: Text(
+                                                  'Referral delayed: follow-up date ${_formatDate(widget.expectedFollowUpDate)} has passed.',
+                                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      const SizedBox(height: 10),
+                                      Wrap(
+                                        spacing: 12,
+                                        runSpacing: 12,
+                                        crossAxisAlignment: WrapCrossAlignment.center,
+                                        children: <Widget>[
+                                          const Text('Update status'),
+                                          DropdownButton<String>(
+                                            value: referralStatus,
+                                            items: const <String>[
+                                              'Pending',
+                                              'Appointment Scheduled',
+                                              'Completed',
+                                              'Under Treatment',
+                                            ].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+                                            onChanged: (v) {
+                                              if (v != null) _setReferralStatus(v);
+                                            },
+                                          ),
+                                          Text(
+                                            'Suggested: $_suggestedReferralStatus',
+                                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                                          ),
+                                        ],
+                                      ),
                                       const SizedBox(height: 10),
                                       SizedBox(
-                                        width: 220,
+                                        width: 240,
                                         child: ElevatedButton.icon(
-                                          onPressed: _showStatusPicker,
-                                          icon: const Icon(Icons.update, size: 18),
-                                          label: const Text('Update Status'),
+                                          onPressed: _createAppointment,
+                                          icon: const Icon(Icons.calendar_month_outlined, size: 18),
+                                          label: const Text('Schedule Appointment'),
                                         ),
                                       ),
                                     ],
                                   ),
                                 ),
+                                _appointmentsCard(),
                                 _sectionCard(
                                   'Child Development Snapshot',
                                   Column(
@@ -1708,8 +2044,18 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
                                       _kv('Follow-up LC delay', '$followupLc months'),
                                       _kv('Improvement', '$lcGain months'),
                                       _kv('Trend', _trend()),
-                                      _kv('AWW task completion', '$awwChecked/${awwRows.length} ($awwCompletion%)'),
-                                      _kv('Caregiver task completion', '$caregiverChecked/${caregiverRows.length} ($caregiverCompletion%)'),
+                                      _kv(
+                                        'AWW task completion',
+                                        _engineActivities.isNotEmpty
+                                            ? '$awwEngineDone/$awwEngineTotal ($awwCompletion%)'
+                                            : '$awwChecked/${awwRows.length} ($awwCompletion%)',
+                                      ),
+                                      _kv(
+                                        'Caregiver task completion',
+                                        _engineActivities.isNotEmpty
+                                            ? '$caregiverEngineDone/$caregiverEngineTotal ($caregiverCompletion%)'
+                                            : '$caregiverChecked/${caregiverRows.length} ($caregiverCompletion%)',
+                                      ),
                                       _kv('Checklist completion', '$checklistChecked/$checklistTotal ($checklistCompletion%)'),
                                       _kv('Combined adherence', '$combinedAdherence%'),
                                       _kv('Projected effect', projectedOutcome),
@@ -1979,4 +2325,47 @@ class _WeekRange {
   final DateTime end;
 
   const _WeekRange(this.weekNumber, this.start, this.end);
+}
+class _Appointment {
+  final String appointmentId;
+  final String referralId;
+  final String childId;
+  final DateTime scheduledDate;
+  final String appointmentType;
+  final String status;
+  final String notes;
+
+  const _Appointment({
+    required this.appointmentId,
+    required this.referralId,
+    required this.childId,
+    required this.scheduledDate,
+    required this.appointmentType,
+    required this.status,
+    required this.notes,
+  });
+
+  factory _Appointment.fromJson(Map<String, dynamic> json) {
+    return _Appointment(
+      appointmentId: json['appointment_id']?.toString() ?? '',
+      referralId: json['referral_id']?.toString() ?? '',
+      childId: json['child_id']?.toString() ?? '',
+      scheduledDate: DateTime.tryParse(json['scheduled_date']?.toString() ?? '') ?? DateTime.now(),
+      appointmentType: json['appointment_type']?.toString() ?? 'Follow-up',
+      status: json['status']?.toString() ?? 'SCHEDULED',
+      notes: json['notes']?.toString() ?? '',
+    );
+  }
+
+  static _Appointment empty() {
+    return _Appointment(
+      appointmentId: '',
+      referralId: '',
+      childId: '',
+      scheduledDate: DateTime.now(),
+      appointmentType: 'Follow-up',
+      status: 'SCHEDULED',
+      notes: '',
+    );
+  }
 }

@@ -1,9 +1,9 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:my_first_app/core/localization/app_localizations.dart';
 import 'package:my_first_app/models/child_model.dart';
 import 'package:my_first_app/models/screening_model.dart' as sm;
 import 'package:my_first_app/screens/dashboard_screen.dart';
-import 'package:my_first_app/screens/referral_screen.dart';
+import 'package:my_first_app/screens/referral_page.dart';
 import 'package:my_first_app/screens/settings_screen.dart';
 import 'package:my_first_app/services/local_db_service.dart';
 import 'package:my_first_app/widgets/language_menu_button.dart';
@@ -78,9 +78,17 @@ class _ResultScreenState extends State<ResultScreen> {
     return worstRisk.isEmpty ? 'low' : worstRisk;
   }
 
-  bool get _shouldShowReferral {
+  bool get _shouldShowReferralAction {
     final overall = _deriveOverallRisk();
     return overall == 'high' || overall == 'critical';
+  }
+
+  String _referralGuidanceText(AppLocalizations l10n) {
+    final overall = _deriveOverallRisk();
+    if (overall == 'critical' || overall == 'high') {
+      return 'Referral Required';
+    }
+    return 'No referral required';
   }
 
   Color _riskColor(String risk) {
@@ -162,7 +170,10 @@ class _ResultScreenState extends State<ResultScreen> {
         title: Text(l10n.t('children')),
         content: Text(l10n.t('total_registered_children', {'count': '$count'})),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(l10n.t('ok'))),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(l10n.t('ok')),
+          ),
         ],
       ),
     );
@@ -177,9 +188,13 @@ class _ResultScreenState extends State<ResultScreen> {
     }
 
     final low = all.where((s) => s.overallRisk == sm.RiskLevel.low).length;
-    final medium = all.where((s) => s.overallRisk == sm.RiskLevel.medium).length;
+    final medium = all
+        .where((s) => s.overallRisk == sm.RiskLevel.medium)
+        .length;
     final high = all.where((s) => s.overallRisk == sm.RiskLevel.high).length;
-    final critical = all.where((s) => s.overallRisk == sm.RiskLevel.critical).length;
+    final critical = all
+        .where((s) => s.overallRisk == sm.RiskLevel.critical)
+        .length;
 
     if (!mounted) return;
     final l10n = AppLocalizations.of(context);
@@ -198,7 +213,10 @@ class _ResultScreenState extends State<ResultScreen> {
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(l10n.t('ok'))),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(l10n.t('ok')),
+          ),
         ],
       ),
     );
@@ -216,9 +234,9 @@ class _ResultScreenState extends State<ResultScreen> {
     if (!mounted) return;
     final l10n = AppLocalizations.of(context);
     if (past.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.t('no_past_results'))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l10n.t('no_past_results'))));
       return;
     }
 
@@ -230,8 +248,12 @@ class _ResultScreenState extends State<ResultScreen> {
           final s = past[index];
           final risk = s.overallRisk.toString().split('.').last;
           return ListTile(
-            title: Text('${s.childId} - ${l10n.t(risk.toLowerCase()).toUpperCase()}'),
-            subtitle: Text(l10n.t('date_label', {'date': '${s.screeningDate.toLocal()}'})),
+            title: Text(
+              '${s.childId} - ${l10n.t(risk.toLowerCase()).toUpperCase()}',
+            ),
+            subtitle: Text(
+              l10n.t('date_label', {'date': '${s.screeningDate.toLocal()}'}),
+            ),
             trailing: const Icon(Icons.open_in_new),
             onTap: () {
               Navigator.of(context).pop();
@@ -256,7 +278,9 @@ class _ResultScreenState extends State<ResultScreen> {
   }
 
   void _openSettings() {
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
   }
 
   Widget _buildNavDrawer() {
@@ -264,12 +288,49 @@ class _ResultScreenState extends State<ResultScreen> {
       child: SafeArea(
         child: ListView(
           children: [
-            ListTile(title: Text(AppLocalizations.of(context).t('navigation'), style: const TextStyle(fontWeight: FontWeight.bold))),
-            ListTile(leading: const Icon(Icons.home_outlined), title: Text(AppLocalizations.of(context).t('dashboard')), onTap: _goDashboard),
-            ListTile(leading: const Icon(Icons.people_outline), title: Text(AppLocalizations.of(context).t('children')), onTap: () { Navigator.of(context).pop(); _showChildrenCount(); }),
-            ListTile(leading: const Icon(Icons.dataset_outlined), title: Text(AppLocalizations.of(context).t('risk_status')), onTap: () { Navigator.of(context).pop(); _showRiskStatus(); }),
-            ListTile(leading: const Icon(Icons.query_stats_outlined), title: Text(AppLocalizations.of(context).t('view_past_results')), onTap: () { Navigator.of(context).pop(); _openPastResults(); }),
-            ListTile(leading: const Icon(Icons.settings_outlined), title: Text(AppLocalizations.of(context).t('settings')), onTap: () { Navigator.of(context).pop(); _openSettings(); }),
+            ListTile(
+              title: Text(
+                AppLocalizations.of(context).t('navigation'),
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.home_outlined),
+              title: Text(AppLocalizations.of(context).t('dashboard')),
+              onTap: _goDashboard,
+            ),
+            ListTile(
+              leading: const Icon(Icons.people_outline),
+              title: Text(AppLocalizations.of(context).t('children')),
+              onTap: () {
+                Navigator.of(context).pop();
+                _showChildrenCount();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.dataset_outlined),
+              title: Text(AppLocalizations.of(context).t('risk_status')),
+              onTap: () {
+                Navigator.of(context).pop();
+                _showRiskStatus();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.query_stats_outlined),
+              title: Text(AppLocalizations.of(context).t('view_past_results')),
+              onTap: () {
+                Navigator.of(context).pop();
+                _openPastResults();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.settings_outlined),
+              title: Text(AppLocalizations.of(context).t('settings')),
+              onTap: () {
+                Navigator.of(context).pop();
+                _openSettings();
+              },
+            ),
           ],
         ),
       ),
@@ -284,7 +345,9 @@ class _ResultScreenState extends State<ResultScreen> {
     final lcDelay = widget.delaySummary?['LC_delay'] ?? 0;
     final cogDelay = widget.delaySummary?['COG_delay'] ?? 0;
     final seDelay = widget.delaySummary?['SE_delay'] ?? 0;
-    final numDelays = widget.delaySummary?['num_delays'] ?? (gmDelay + fmDelay + lcDelay + cogDelay + seDelay);
+    final numDelays =
+        widget.delaySummary?['num_delays'] ??
+        (gmDelay + fmDelay + lcDelay + cogDelay + seDelay);
     final sorted = widget.domainScores.entries.toList()
       ..sort((a, b) => a.value.compareTo(b.value));
     final focusDomain = sorted.isNotEmpty ? sorted.first : null;
@@ -303,20 +366,47 @@ class _ResultScreenState extends State<ResultScreen> {
         ),
         child: Row(
           children: [
-            CircleAvatar(radius: 9, backgroundColor: c, child: const Icon(Icons.brightness_1, size: 7, color: Colors.white)),
+            CircleAvatar(
+              radius: 9,
+              backgroundColor: c,
+              child: const Icon(
+                Icons.brightness_1,
+                size: 7,
+                color: Colors.white,
+              ),
+            ),
             const SizedBox(width: 8),
             Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
-                  Text(l10n.t('score_percent', {'score': '${(score * 100).round()}'}), style: const TextStyle(fontSize: 10, color: Color(0xFF596773))),
-                    ],
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
-                ),
+                  Text(
+                    l10n.t('score_percent', {
+                      'score': '${(score * 100).round()}',
+                    }),
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: Color(0xFF596773),
+                    ),
+                  ),
+                ],
+              ),
+            ),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(12)),
+              decoration: BoxDecoration(
+                color: c,
+                borderRadius: BorderRadius.circular(12),
+              ),
               child: Text(
                 displayRisk,
                 style: TextStyle(
@@ -332,7 +422,12 @@ class _ResultScreenState extends State<ResultScreen> {
     }
 
     return SingleChildScrollView(
-      padding: EdgeInsets.fromLTRB(desktop ? 18 : 12, 12, desktop ? 18 : 12, 14),
+      padding: EdgeInsets.fromLTRB(
+        desktop ? 18 : 12,
+        12,
+        desktop ? 18 : 12,
+        14,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -347,7 +442,13 @@ class _ResultScreenState extends State<ResultScreen> {
                 ],
               ),
               borderRadius: BorderRadius.circular(12),
-              boxShadow: const [BoxShadow(color: Color(0x22000000), blurRadius: 6, offset: Offset(0, 2))],
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x22000000),
+                  blurRadius: 6,
+                  offset: Offset(0, 2),
+                ),
+              ],
             ),
             child: Row(
               children: [
@@ -355,26 +456,39 @@ class _ResultScreenState extends State<ResultScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(l10n.t('overall_risk'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 22)),
+                      Text(
+                        l10n.t('overall_risk'),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 22,
+                        ),
+                      ),
                       const SizedBox(height: 4),
                       Text(
-                        l10n.t(
-                          'score_percent',
-                          {
-                            'score': '${(widget.domainScores.values.isEmpty ? 0 : (widget.domainScores.values.reduce((a, b) => a + b) / widget.domainScores.length) * 100).round()}',
-                          },
+                        l10n.t('score_percent', {
+                          'score':
+                              '${(widget.domainScores.values.isEmpty ? 0 : (widget.domainScores.values.reduce((a, b) => a + b) / widget.domainScores.length) * 100).round()}',
+                        }),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
                         ),
-                        style: const TextStyle(color: Colors.white, fontSize: 13),
                       ),
                     ],
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: _riskColor(overallRiskLabel),
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.5)),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.5),
+                    ),
                   ),
                   child: Text(
                     _localizedRiskLabel(overallRiskLabel, l10n).toUpperCase(),
@@ -389,52 +503,97 @@ class _ResultScreenState extends State<ResultScreen> {
           ),
           const SizedBox(height: 10),
           if (focusDomain != null)
-            Builder(builder: (_) {
-              final focusRiskKey = widget.domainRiskLevels?[focusDomain.key] ?? _domainStatusText(focusDomain.value);
-              final focusColor = _riskColor(focusRiskKey);
-              final focusRiskLabel = _localizedRiskLabel(focusRiskKey, l10n);
-              return
-            Container(
-              width: desktop ? 420 : double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: _riskTint(focusRiskKey),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFE6ECF3)),
-              ),
-              child: Row(
-                children: [
-                  CircleAvatar(radius: 10, backgroundColor: focusColor, child: const Icon(Icons.priority_high, color: Colors.white, size: 13)),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(_domainLabel(focusDomain.key, l10n),
-                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-                        Text(l10n.t('score_percent', {'score': '${(focusDomain.value * 100).round()}'}), style: const TextStyle(fontSize: 12, color: Color(0xFF5D6975))),
-                      ],
-                    ),
+            Builder(
+              builder: (_) {
+                final focusRiskKey =
+                    widget.domainRiskLevels?[focusDomain.key] ??
+                    _domainStatusText(focusDomain.value);
+                final focusColor = _riskColor(focusRiskKey);
+                final focusRiskLabel = _localizedRiskLabel(focusRiskKey, l10n);
+                return Container(
+                  width: desktop ? 420 : double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: _riskTint(focusRiskKey),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFE6ECF3)),
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-                    decoration: BoxDecoration(color: focusColor, borderRadius: const BorderRadius.all(Radius.circular(12))),
-                    child: Text(
-                      focusRiskLabel,
-                      style: TextStyle(color: _riskTextOnBadge(focusRiskKey), fontSize: 10, fontWeight: FontWeight.bold),
-                    ),
+                  child: Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 10,
+                        backgroundColor: focusColor,
+                        child: const Icon(
+                          Icons.priority_high,
+                          color: Colors.white,
+                          size: 13,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _domainLabel(focusDomain.key, l10n),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 14,
+                              ),
+                            ),
+                            Text(
+                              l10n.t('score_percent', {
+                                'score': '${(focusDomain.value * 100).round()}',
+                              }),
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Color(0xFF5D6975),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: focusColor,
+                          borderRadius: const BorderRadius.all(
+                            Radius.circular(12),
+                          ),
+                        ),
+                        child: Text(
+                          focusRiskLabel,
+                          style: TextStyle(
+                            color: _riskTextOnBadge(focusRiskKey),
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            );}),
+                );
+              },
+            ),
           const SizedBox(height: 10),
-          Text(AppLocalizations.of(context).t('domain_breakdown'), style: const TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF40505E))),
+          Text(
+            AppLocalizations.of(context).t('domain_breakdown'),
+            style: const TextStyle(
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF40505E),
+            ),
+          ),
           const SizedBox(height: 8),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
               children: widget.domainScores.entries.map((e) {
-                final riskText = widget.domainRiskLevels?[e.key] ?? _domainStatusText(e.value);
+                final riskText =
+                    widget.domainRiskLevels?[e.key] ??
+                    _domainStatusText(e.value);
                 final bg = _riskTint(riskText);
                 return Padding(
                   padding: const EdgeInsets.only(right: 8),
@@ -446,13 +605,21 @@ class _ResultScreenState extends State<ResultScreen> {
           const SizedBox(height: 8),
           Card(
             color: const Color(0xFFF3EDF9),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
             child: Padding(
               padding: const EdgeInsets.all(8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(AppLocalizations.of(context).t('delay_summary'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                  Text(
+                    AppLocalizations.of(context).t('delay_summary'),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                  ),
                   const SizedBox(height: 4),
                   SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
@@ -462,22 +629,82 @@ class _ResultScreenState extends State<ResultScreen> {
                       dataRowMaxHeight: 34,
                       columnSpacing: 24,
                       columns: [
-                        DataColumn(label: Text(AppLocalizations.of(context).t('gm_delay'), style: const TextStyle(fontSize: 10))),
-                        DataColumn(label: Text(AppLocalizations.of(context).t('fm_delay'), style: const TextStyle(fontSize: 10))),
-                        DataColumn(label: Text(AppLocalizations.of(context).t('lc_delay'), style: const TextStyle(fontSize: 10))),
-                        DataColumn(label: Text(AppLocalizations.of(context).t('cog_delay'), style: const TextStyle(fontSize: 10))),
-                        DataColumn(label: Text(AppLocalizations.of(context).t('se_delay'), style: const TextStyle(fontSize: 10))),
-                        DataColumn(label: Text(AppLocalizations.of(context).t('num_delays'), style: const TextStyle(fontSize: 10))),
+                        DataColumn(
+                          label: Text(
+                            AppLocalizations.of(context).t('gm_delay'),
+                            style: const TextStyle(fontSize: 10),
+                          ),
+                        ),
+                        DataColumn(
+                          label: Text(
+                            AppLocalizations.of(context).t('fm_delay'),
+                            style: const TextStyle(fontSize: 10),
+                          ),
+                        ),
+                        DataColumn(
+                          label: Text(
+                            AppLocalizations.of(context).t('lc_delay'),
+                            style: const TextStyle(fontSize: 10),
+                          ),
+                        ),
+                        DataColumn(
+                          label: Text(
+                            AppLocalizations.of(context).t('cog_delay'),
+                            style: const TextStyle(fontSize: 10),
+                          ),
+                        ),
+                        DataColumn(
+                          label: Text(
+                            AppLocalizations.of(context).t('se_delay'),
+                            style: const TextStyle(fontSize: 10),
+                          ),
+                        ),
+                        DataColumn(
+                          label: Text(
+                            AppLocalizations.of(context).t('num_delays'),
+                            style: const TextStyle(fontSize: 10),
+                          ),
+                        ),
                       ],
                       rows: [
                         DataRow(
                           cells: [
-                            DataCell(Text('$gmDelay', style: const TextStyle(fontSize: 12))),
-                            DataCell(Text('$fmDelay', style: const TextStyle(fontSize: 12))),
-                            DataCell(Text('$lcDelay', style: const TextStyle(fontSize: 12))),
-                            DataCell(Text('$cogDelay', style: const TextStyle(fontSize: 12))),
-                            DataCell(Text('$seDelay', style: const TextStyle(fontSize: 12))),
-                            DataCell(Text('$numDelays', style: const TextStyle(fontSize: 12))),
+                            DataCell(
+                              Text(
+                                '$gmDelay',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ),
+                            DataCell(
+                              Text(
+                                '$fmDelay',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ),
+                            DataCell(
+                              Text(
+                                '$lcDelay',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ),
+                            DataCell(
+                              Text(
+                                '$cogDelay',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ),
+                            DataCell(
+                              Text(
+                                '$seDelay',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ),
+                            DataCell(
+                              Text(
+                                '$numDelays',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ),
                           ],
                         ),
                       ],
@@ -490,29 +717,52 @@ class _ResultScreenState extends State<ResultScreen> {
           const SizedBox(height: 8),
           Card(
             color: const Color(0xFFF3EDF9),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
             child: ListTile(
-              title: Text(AppLocalizations.of(context).t('explainability'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+              title: Text(
+                AppLocalizations.of(context).t('explainability'),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                ),
+              ),
               subtitle: Text(widget.explainability),
             ),
           ),
           const SizedBox(height: 10),
-          if (_shouldShowReferral)
+          if (_shouldShowReferralAction) ...[
+            Container(
+              width: desktop ? 420 : double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF8E1),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFFFE082)),
+              ),
+              child: Text(
+                _referralGuidanceText(l10n),
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+          if (_shouldShowReferralAction)
             SizedBox(
               width: desktop ? 420 : double.infinity,
               child: ElevatedButton.icon(
                 icon: const Icon(Icons.local_hospital),
-                label: Text(l10n.t('generate_referral')),
+                label: const Text('Continue to Referral'),
                 onPressed: () {
-                  Navigator.of(context).push(
+                  Navigator.of(context).pushReplacement(
                     MaterialPageRoute(
-                      builder: (_) => ReferralScreen(
+                      builder: (_) => ReferralPage(
                         childId: widget.childId,
                         awwId: widget.awwId,
                         ageMonths: widget.ageMonths,
                         overallRisk: widget.overallRisk,
                         domainScores: widget.domainScores,
-                        domainRiskLevels: widget.domainRiskLevels,
                       ),
                     ),
                   );
@@ -558,7 +808,9 @@ class _ResultScreenState extends State<ResultScreen> {
             height: 56,
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: const BoxDecoration(
-              gradient: LinearGradient(colors: [Color(0xFF1C86DF), Color(0xFF2A9AF5)]),
+              gradient: LinearGradient(
+                colors: [Color(0xFF1C86DF), Color(0xFF2A9AF5)],
+              ),
             ),
             child: Row(
               children: [
@@ -571,19 +823,40 @@ class _ResultScreenState extends State<ResultScreen> {
                     errorBuilder: (context, error, stackTrace) => Container(
                       width: 28,
                       height: 28,
-                      decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                      ),
                       alignment: Alignment.center,
-                      child: Text(AppLocalizations.of(context).t('ap_short'), style: const TextStyle(fontSize: 9, color: Color(0xFF1976D2), fontWeight: FontWeight.bold)),
+                      child: Text(
+                        AppLocalizations.of(context).t('ap_short'),
+                        style: const TextStyle(
+                          fontSize: 9,
+                          color: Color(0xFF1976D2),
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
                   ),
                 ),
                 const SizedBox(width: 12),
-                Text(AppLocalizations.of(context).t('govt_andhra_pradesh'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
+                Text(
+                  AppLocalizations.of(context).t('govt_andhra_pradesh'),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                ),
                 const Spacer(),
                 const LanguageMenuButton(iconColor: Colors.white, iconSize: 18),
                 const Icon(Icons.search, color: Colors.white, size: 18),
                 const SizedBox(width: 14),
-                const Icon(Icons.power_settings_new, color: Colors.white, size: 18),
+                const Icon(
+                  Icons.power_settings_new,
+                  color: Colors.white,
+                  size: 18,
+                ),
                 const SizedBox(width: 14),
                 const Icon(Icons.menu, color: Colors.white, size: 18),
               ],
@@ -597,11 +870,31 @@ class _ResultScreenState extends State<ResultScreen> {
                   color: Colors.white,
                   child: ListView(
                     children: [
-                      _ResultSideItem(icon: Icons.home_outlined, label: l10n.t('dashboard'), onTap: _goDashboard),
-                      _ResultSideItem(icon: Icons.people_outline, label: l10n.t('children'), onTap: _showChildrenCount),
-                      _ResultSideItem(icon: Icons.dataset_outlined, label: l10n.t('risk_status'), onTap: _showRiskStatus),
-                      _ResultSideItem(icon: Icons.query_stats_outlined, label: l10n.t('view_past_results'), onTap: _openPastResults),
-                      _ResultSideItem(icon: Icons.settings_outlined, label: l10n.t('settings'), onTap: _openSettings),
+                      _ResultSideItem(
+                        icon: Icons.home_outlined,
+                        label: l10n.t('dashboard'),
+                        onTap: _goDashboard,
+                      ),
+                      _ResultSideItem(
+                        icon: Icons.people_outline,
+                        label: l10n.t('children'),
+                        onTap: _showChildrenCount,
+                      ),
+                      _ResultSideItem(
+                        icon: Icons.dataset_outlined,
+                        label: l10n.t('risk_status'),
+                        onTap: _showRiskStatus,
+                      ),
+                      _ResultSideItem(
+                        icon: Icons.query_stats_outlined,
+                        label: l10n.t('view_past_results'),
+                        onTap: _openPastResults,
+                      ),
+                      _ResultSideItem(
+                        icon: Icons.settings_outlined,
+                        label: l10n.t('settings'),
+                        onTap: _openSettings,
+                      ),
                     ],
                   ),
                 ),
@@ -620,19 +913,29 @@ class _ResultSideItem extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
 
-  const _ResultSideItem({required this.icon, required this.label, required this.onTap});
+  const _ResultSideItem({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFE7EDF3)))),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: Color(0xFFE7EDF3))),
+      ),
       child: ListTile(
         dense: true,
         onTap: onTap,
         leading: Icon(icon, size: 18, color: const Color(0xFF6A7580)),
         title: Text(
           label,
-          style: const TextStyle(fontSize: 13, color: Color(0xFF58636F), fontWeight: FontWeight.w600),
+          style: const TextStyle(
+            fontSize: 13,
+            color: Color(0xFF58636F),
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
     );

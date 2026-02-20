@@ -15,8 +15,6 @@ import 'package:my_first_app/widgets/language_menu_button.dart';
 import 'package:my_first_app/core/utils/delay_summary.dart';
 import 'package:my_first_app/core/utils/weighted_scoring_engine.dart';
 
-
-
 class ScreeningScreen extends StatefulWidget {
   final String childId;
   final int ageMonths;
@@ -41,7 +39,7 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
   final LocalDBService _localDb = LocalDBService();
 
   // domain -> index -> response (1=yes, 0=no)
-  Map<String, Map<int,int>> domainResponses = {};
+  Map<String, Map<int, int>> domainResponses = {};
   bool submitting = false;
   late final String _draftScreeningId;
   Map<String, List<String>> _displayQuestions = {};
@@ -81,27 +79,27 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
     return true;
   }
 
-  void _onDomainChanged(String domain, Map<int,int> responses) {
+  void _onDomainChanged(String domain, Map<int, int> responses) {
     setState(() {
       domainResponses[domain] = responses;
     });
   }
 
-  Map<String,double> _computeDomainScores() {
-    final Map<String,double> scores = {};
-    
+  Map<String, double> _computeDomainScores() {
+    final Map<String, double> scores = {};
+
     domainResponses.forEach((domain, respMap) {
       if (respMap.isEmpty) {
         scores[domain] = 0.5; // neutral if no responses
         return;
       }
-      
+
       // Convert map responses to list (0=No, 1=Yes) - use directly
       final responseList = List<int>.filled(respMap.length, 0);
       respMap.forEach((index, value) {
         responseList[index] = value; // 0 or 1 directly
       });
-      
+
       // Use weighted scoring engine with exact formula:
       // S = Σ(aᵢ × wᵢ)
       // T = 0.5 × Σ(wᵢ)
@@ -111,10 +109,10 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
         responseList,
         widget.ageMonths,
       );
-      
+
       scores[domain] = weightedScore;
     });
-    
+
     return scores;
   }
 
@@ -130,11 +128,18 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
       awwId: widget.awwId,
       assessmentType: AssessmentType.baseline,
       ageMonths: widget.ageMonths,
-      domainResponses: domainResponses.map((k, v) => MapEntry(k, v.values.toList())),
+      domainResponses: domainResponses.map(
+        (k, v) => MapEntry(k, v.values.toList()),
+      ),
       domainScores: domainScores,
       overallRisk: RiskLevel.low,
-      explainability: l10n.t('draft_saved_for_domain', {'domain': _domainLabel(domain, l10n)}),
-      missedMilestones: domainResponses.values.fold<int>(0, (acc, m) => acc + m.values.where((v) => v == 0).length),
+      explainability: l10n.t('draft_saved_for_domain', {
+        'domain': _domainLabel(domain, l10n),
+      }),
+      missedMilestones: domainResponses.values.fold<int>(
+        0,
+        (acc, m) => acc + m.values.where((v) => v == 0).length,
+      ),
       delayMonths: 0,
       consentGiven: widget.consentGiven,
       consentTimestamp: widget.consentTimestamp,
@@ -145,7 +150,11 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
     await localDb.saveScreening(draft);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${_domainLabel(domain, l10n)} ${l10n.t('responses_saved')}')),
+      SnackBar(
+        content: Text(
+          '${_domainLabel(domain, l10n)} ${l10n.t('responses_saved')}',
+        ),
+      ),
     );
   }
 
@@ -183,7 +192,9 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
     rawDomainScores.forEach((key, value) {
       final label = '$value';
       final n = _normalizeRisk(label);
-      mapped['$key'] = n.isEmpty ? label : '${n[0].toUpperCase()}${n.substring(1)}';
+      mapped['$key'] = n.isEmpty
+          ? label
+          : '${n[0].toUpperCase()}${n.substring(1)}';
     });
     return mapped;
   }
@@ -204,11 +215,15 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
     final domainRiskLevels = <String, String>{};
     for (final domain in AppConstants.domains) {
       final score = domainScores[domain] ?? 0.5;
-      domainRiskLevels[domain] = WeightedScoringEngine.domainScoreToRiskLabel(score);
+      domainRiskLevels[domain] = WeightedScoringEngine.domainScoreToRiskLabel(
+        score,
+      );
     }
 
     // Calculate overall risk from domain scores
-    var overallRisk = WeightedScoringEngine.overallRiskFromDomains(domainScores);
+    var overallRisk = WeightedScoringEngine.overallRiskFromDomains(
+      domainScores,
+    );
     var explainability = '';
     var finalDomainScores = Map<String, double>.from(domainScores);
     final localDelaySummary = buildDelaySummaryFromResponses(
@@ -230,6 +245,9 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
     // Build payload same as API contract
     final payload = {
       'child_id': widget.childId,
+      'aww_id': widget.awwId,
+      'child_name': child?.childName ?? widget.childId,
+      'village': child?.address ?? child?.awcCode ?? '',
       'assessment_type': 'baseline',
       'assessment_cycle': 'Baseline',
       'age_months': widget.ageMonths,
@@ -240,7 +258,9 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
       'awc_id': child?.awcCode ?? 'AWC001',
       // Keep an explicit empty/default sector id until sector mapping is captured.
       'sector_id': '',
-      'domain_responses': domainResponses.map((k,v) => MapEntry(k, v.values.toList())),
+      'domain_responses': domainResponses.map(
+        (k, v) => MapEntry(k, v.values.toList()),
+      ),
       'domain_scores': domainScores,
       'overall_risk': overallRisk,
       'consent_given': widget.consentGiven,
@@ -253,14 +273,19 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
       awwId: widget.awwId,
       assessmentType: AssessmentType.baseline,
       ageMonths: widget.ageMonths,
-      domainResponses: domainResponses.map((k, v) => MapEntry(k, v.values.toList())),
+      domainResponses: domainResponses.map(
+        (k, v) => MapEntry(k, v.values.toList()),
+      ),
       domainScores: domainScores,
       overallRisk: RiskLevel.values.firstWhere(
         (e) => e.toString().split('.').last == overallRisk,
         orElse: () => RiskLevel.low,
       ),
       explainability: l10n.t('rule_based_scoring_placeholder'),
-      missedMilestones: domainResponses.values.fold<int>(0, (acc, m) => acc + m.values.where((v) => v == 0).length),
+      missedMilestones: domainResponses.values.fold<int>(
+        0,
+        (acc, m) => acc + m.values.where((v) => v == 0).length,
+      ),
       delayMonths: 0,
       consentGiven: widget.consentGiven,
       consentTimestamp: widget.consentTimestamp,
@@ -293,7 +318,9 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
       }
       final delayRaw = response['delay_summary'];
       if (delayRaw is Map) {
-        final apiSummary = delayRaw.map((k, v) => MapEntry('$k', (v as num).toInt()));
+        final apiSummary = delayRaw.map(
+          (k, v) => MapEntry('$k', (v as num).toInt()),
+        );
         for (final entry in apiSummary.entries) {
           delaySummary.putIfAbsent(entry.key, () => entry.value);
         }
@@ -307,6 +334,7 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
         domainScores: finalDomainScores,
         overallRisk: riskEnum,
         explainability: explainability,
+        referralTriggered: false,
         submittedAt: DateTime.now(),
       );
 
@@ -318,7 +346,11 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(AppLocalizations.of(context).t('screening_saved_not_synced'))),
+          SnackBar(
+            content: Text(
+              AppLocalizations.of(context).t('screening_saved_not_synced'),
+            ),
+          ),
         );
       }
       // Continue to next step with local results even if API is unreachable.
@@ -333,7 +365,10 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
           prevDomainScores: finalDomainScores,
           domainRiskLevels: domainRiskLevels,
           overallRisk: overallRisk,
-          missedMilestones: domainResponses.values.fold<int>(0, (acc, m) => acc + m.values.where((v) => v == 0).length),
+          missedMilestones: domainResponses.values.fold<int>(
+            0,
+            (acc, m) => acc + m.values.where((v) => v == 0).length,
+          ),
           explainability: explainability,
           childId: widget.childId,
           awwId: widget.awwId,
@@ -363,7 +398,10 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
         title: Text(l10n.t('children')),
         content: Text(l10n.t('total_registered_children', {'count': '$count'})),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(l10n.t('ok'))),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(l10n.t('ok')),
+          ),
         ],
       ),
     );
@@ -380,7 +418,9 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
     final low = all.where((s) => s.overallRisk == RiskLevel.low).length;
     final medium = all.where((s) => s.overallRisk == RiskLevel.medium).length;
     final high = all.where((s) => s.overallRisk == RiskLevel.high).length;
-    final critical = all.where((s) => s.overallRisk == RiskLevel.critical).length;
+    final critical = all
+        .where((s) => s.overallRisk == RiskLevel.critical)
+        .length;
 
     if (!mounted) return;
     final l10n = AppLocalizations.of(context);
@@ -399,7 +439,10 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(l10n.t('ok'))),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(l10n.t('ok')),
+          ),
         ],
       ),
     );
@@ -417,9 +460,9 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
     if (!mounted) return;
     final l10n = AppLocalizations.of(context);
     if (past.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.t('no_past_results'))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l10n.t('no_past_results'))));
       return;
     }
 
@@ -435,8 +478,12 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
             ageMonths: s.ageMonths,
           );
           return ListTile(
-            title: Text('${s.childId} - ${l10n.t(risk.toLowerCase()).toUpperCase()}'),
-            subtitle: Text(l10n.t('date_label', {'date': '${s.screeningDate.toLocal()}'})),
+            title: Text(
+              '${s.childId} - ${l10n.t(risk.toLowerCase()).toUpperCase()}',
+            ),
+            subtitle: Text(
+              l10n.t('date_label', {'date': '${s.screeningDate.toLocal()}'}),
+            ),
             trailing: const Icon(Icons.open_in_new),
             onTap: () {
               Navigator.of(context).pop();
@@ -462,9 +509,9 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
   }
 
   void _openSettings() {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const SettingsScreen()),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
   }
 
   String _domainLabel(String key, AppLocalizations l10n) {
@@ -491,13 +538,48 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
         child: ListView(
           children: [
             ListTile(
-              title: Text(l10n.t('navigation'), style: const TextStyle(fontWeight: FontWeight.bold)),
+              title: Text(
+                l10n.t('navigation'),
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
             ),
-            ListTile(leading: const Icon(Icons.home_outlined), title: Text(l10n.t('dashboard')), onTap: _goDashboard),
-            ListTile(leading: const Icon(Icons.people_outline), title: Text(l10n.t('children')), onTap: () { Navigator.of(context).pop(); _showChildrenCount(); }),
-            ListTile(leading: const Icon(Icons.dataset_outlined), title: Text(l10n.t('risk_status')), onTap: () { Navigator.of(context).pop(); _showRiskStatus(); }),
-            ListTile(leading: const Icon(Icons.query_stats_outlined), title: Text(l10n.t('view_past_results')), onTap: () { Navigator.of(context).pop(); _openPastResults(); }),
-            ListTile(leading: const Icon(Icons.settings_outlined), title: Text(l10n.t('settings')), onTap: () { Navigator.of(context).pop(); _openSettings(); }),
+            ListTile(
+              leading: const Icon(Icons.home_outlined),
+              title: Text(l10n.t('dashboard')),
+              onTap: _goDashboard,
+            ),
+            ListTile(
+              leading: const Icon(Icons.people_outline),
+              title: Text(l10n.t('children')),
+              onTap: () {
+                Navigator.of(context).pop();
+                _showChildrenCount();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.dataset_outlined),
+              title: Text(l10n.t('risk_status')),
+              onTap: () {
+                Navigator.of(context).pop();
+                _showRiskStatus();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.query_stats_outlined),
+              title: Text(l10n.t('view_past_results')),
+              onTap: () {
+                Navigator.of(context).pop();
+                _openPastResults();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.settings_outlined),
+              title: Text(l10n.t('settings')),
+              onTap: () {
+                Navigator.of(context).pop();
+                _openSettings();
+              },
+            ),
           ],
         ),
       ),
@@ -507,9 +589,17 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final totalQuestions = _displayQuestions.values.fold<int>(0, (a, b) => a + b.length);
-    final answeredQuestions = domainResponses.values.fold<int>(0, (a, b) => a + b.length);
-    final progress = totalQuestions == 0 ? 0.0 : answeredQuestions / totalQuestions;
+    final totalQuestions = _displayQuestions.values.fold<int>(
+      0,
+      (a, b) => a + b.length,
+    );
+    final answeredQuestions = domainResponses.values.fold<int>(
+      0,
+      (a, b) => a + b.length,
+    );
+    final progress = totalQuestions == 0
+        ? 0.0
+        : answeredQuestions / totalQuestions;
     final isDesktop = MediaQuery.of(context).size.width >= 1000;
 
     final headerCard = Container(
@@ -532,7 +622,10 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
               Expanded(
                 child: Text(
                   l10n.t('assessment_for', {'childId': widget.childId}),
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
               ClipOval(
@@ -544,10 +637,18 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
                   errorBuilder: (context, error, stackTrace) => Container(
                     width: 40,
                     height: 40,
-                    decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.white),
+                    decoration: const BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.white,
+                    ),
                     alignment: Alignment.center,
-                    child: Text(AppLocalizations.of(context).t('ap_short'), style: const TextStyle(color: Color(0xFF1976D2), fontWeight: FontWeight.bold)),
-
+                    child: Text(
+                      AppLocalizations.of(context).t('ap_short'),
+                      style: const TextStyle(
+                        color: Color(0xFF1976D2),
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -560,20 +661,22 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
               value: progress,
               minHeight: 7,
               backgroundColor: Colors.white.withValues(alpha: 0.35),
-              valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF0D5BA7)),
+              valueColor: const AlwaysStoppedAnimation<Color>(
+                Color(0xFF0D5BA7),
+              ),
             ),
           ),
           const SizedBox(height: 5),
           Text(
-            l10n.t(
-              'questions_answered_summary',
-              {
-                'answered': '$answeredQuestions',
-                'total': '$totalQuestions',
-                'age': '${widget.ageMonths}',
-              },
+            l10n.t('questions_answered_summary', {
+              'answered': '$answeredQuestions',
+              'total': '$totalQuestions',
+              'age': '${widget.ageMonths}',
+            }),
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.95),
+              fontSize: 12,
             ),
-            style: TextStyle(color: Colors.white.withValues(alpha: 0.95), fontSize: 12),
           ),
         ],
       ),
@@ -600,7 +703,10 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
       return Scaffold(
         drawer: _buildNavDrawer(),
         appBar: AppBar(
-          title: Text(l10n.t('screening_assessment'), style: const TextStyle(fontWeight: FontWeight.w700)),
+          title: Text(
+            l10n.t('screening_assessment'),
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
           backgroundColor: const Color(0xFF0D5BA7),
           foregroundColor: Colors.white,
           actions: [
@@ -622,7 +728,9 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
               child: SizedBox(
                 width: double.infinity,
                 child: CustomButton(
-                  label: submitting ? l10n.t('submitting') : l10n.t('submit_assessment'),
+                  label: submitting
+                      ? l10n.t('submitting')
+                      : l10n.t('submit_assessment'),
                   onPressed: submitting ? () {} : _onSubmit,
                   elevated: true,
                 ),
@@ -641,7 +749,9 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
             height: 56,
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: const BoxDecoration(
-              gradient: LinearGradient(colors: [Color(0xFF1C86DF), Color(0xFF2A9AF5)]),
+              gradient: LinearGradient(
+                colors: [Color(0xFF1C86DF), Color(0xFF2A9AF5)],
+              ),
             ),
             child: Row(
               children: [
@@ -654,19 +764,40 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
                     errorBuilder: (context, error, stackTrace) => Container(
                       width: 28,
                       height: 28,
-                      decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                      ),
                       alignment: Alignment.center,
-                      child: Text(AppLocalizations.of(context).t('ap_short'), style: const TextStyle(fontSize: 9, color: Color(0xFF1976D2), fontWeight: FontWeight.bold)),
+                      child: Text(
+                        AppLocalizations.of(context).t('ap_short'),
+                        style: const TextStyle(
+                          fontSize: 9,
+                          color: Color(0xFF1976D2),
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
                   ),
                 ),
                 const SizedBox(width: 12),
-                Text(AppLocalizations.of(context).t('govt_andhra_pradesh'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
+                Text(
+                  AppLocalizations.of(context).t('govt_andhra_pradesh'),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                ),
                 const Spacer(),
                 const LanguageMenuButton(iconColor: Colors.white, iconSize: 18),
                 const Icon(Icons.search, color: Colors.white, size: 18),
                 const SizedBox(width: 14),
-                const Icon(Icons.power_settings_new, color: Colors.white, size: 18),
+                const Icon(
+                  Icons.power_settings_new,
+                  color: Colors.white,
+                  size: 18,
+                ),
                 const SizedBox(width: 14),
                 const Icon(Icons.menu, color: Colors.white, size: 18),
               ],
@@ -680,11 +811,31 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
                   color: Colors.white,
                   child: ListView(
                     children: [
-                      _ScreenSideItem(icon: Icons.home_outlined, label: l10n.t('dashboard'), onTap: _goDashboard),
-                      _ScreenSideItem(icon: Icons.people_outline, label: l10n.t('children'), onTap: _showChildrenCount),
-                      _ScreenSideItem(icon: Icons.dataset_outlined, label: l10n.t('risk_status'), onTap: _showRiskStatus),
-                      _ScreenSideItem(icon: Icons.query_stats_outlined, label: l10n.t('view_past_results'), onTap: _openPastResults),
-                      _ScreenSideItem(icon: Icons.settings_outlined, label: l10n.t('settings'), onTap: _openSettings),
+                      _ScreenSideItem(
+                        icon: Icons.home_outlined,
+                        label: l10n.t('dashboard'),
+                        onTap: _goDashboard,
+                      ),
+                      _ScreenSideItem(
+                        icon: Icons.people_outline,
+                        label: l10n.t('children'),
+                        onTap: _showChildrenCount,
+                      ),
+                      _ScreenSideItem(
+                        icon: Icons.dataset_outlined,
+                        label: l10n.t('risk_status'),
+                        onTap: _showRiskStatus,
+                      ),
+                      _ScreenSideItem(
+                        icon: Icons.query_stats_outlined,
+                        label: l10n.t('view_past_results'),
+                        onTap: _openPastResults,
+                      ),
+                      _ScreenSideItem(
+                        icon: Icons.settings_outlined,
+                        label: l10n.t('settings'),
+                        onTap: _openSettings,
+                      ),
                     ],
                   ),
                 ),
@@ -700,7 +851,9 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
                           child: SizedBox(
                             width: 420,
                             child: CustomButton(
-                              label: submitting ? l10n.t('submitting') : l10n.t('submit_assessment'),
+                              label: submitting
+                                  ? l10n.t('submitting')
+                                  : l10n.t('submit_assessment'),
                               onPressed: submitting ? () {} : _onSubmit,
                               elevated: true,
                             ),
@@ -724,7 +877,11 @@ class _ScreenSideItem extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
 
-  const _ScreenSideItem({required this.icon, required this.label, required this.onTap});
+  const _ScreenSideItem({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -738,7 +895,11 @@ class _ScreenSideItem extends StatelessWidget {
         leading: Icon(icon, size: 18, color: const Color(0xFF6A7580)),
         title: Text(
           label,
-          style: const TextStyle(fontSize: 13, color: Color(0xFF58636F), fontWeight: FontWeight.w600),
+          style: const TextStyle(
+            fontSize: 13,
+            color: Color(0xFF58636F),
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
     );

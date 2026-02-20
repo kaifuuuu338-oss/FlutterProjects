@@ -60,10 +60,7 @@ class APIService {
     try {
       final response = await _dio.post(
         AppConstants.loginEndpoint,
-        data: {
-          'mobile_number': mobile,
-          'password': password,
-        },
+        data: {'mobile_number': mobile, 'password': password},
       );
       final body = response.data;
       if (body is Map<String, dynamic>) {
@@ -86,7 +83,9 @@ class APIService {
   }
 
   /// Submit screening
-  Future<Map<String, dynamic>> submitScreening(Map<String, dynamic> screeningData) async {
+  Future<Map<String, dynamic>> submitScreening(
+    Map<String, dynamic> screeningData,
+  ) async {
     try {
       final response = await _dio.post(
         AppConstants.screeningEndpoint,
@@ -134,7 +133,9 @@ class APIService {
   }
 
   /// Create referral
-  Future<Map<String, dynamic>> createReferral(Map<String, dynamic> referralData) async {
+  Future<Map<String, dynamic>> createReferral(
+    Map<String, dynamic> referralData,
+  ) async {
     try {
       final response = await _dio.post(
         AppConstants.referralEndpoint,
@@ -146,9 +147,14 @@ class APIService {
     }
   }
 
-  Future<Map<String, dynamic>> generateProblemBInterventionPlan(Map<String, dynamic> payload) async {
+  Future<Map<String, dynamic>> generateProblemBInterventionPlan(
+    Map<String, dynamic> payload,
+  ) async {
     try {
-      final response = await _dio.post('/problem-b/intervention-plan', data: payload);
+      final response = await _dio.post(
+        '/problem-b/intervention-plan',
+        data: payload,
+      );
       return response.data as Map<String, dynamic>;
     } on DioException catch (e) {
       throw Exception('Problem B intervention generation failed: ${e.message}');
@@ -211,9 +217,14 @@ class APIService {
     }
   }
 
-  Future<Map<String, dynamic>> generateProblemBActivities(Map<String, dynamic> payload) async {
+  Future<Map<String, dynamic>> generateProblemBActivities(
+    Map<String, dynamic> payload,
+  ) async {
     try {
-      final response = await _dio.post('/problem-b/activities/generate', data: payload);
+      final response = await _dio.post(
+        '/problem-b/activities/generate',
+        data: payload,
+      );
       return response.data as Map<String, dynamic>;
     } on DioException catch (e) {
       throw Exception('Problem B activity generation failed: ${e.message}');
@@ -258,6 +269,206 @@ class APIService {
     }
   }
 
+  Future<Map<String, dynamic>> createAppointment({
+    required String referralId,
+    required String childId,
+    required String scheduledDate,
+    required String appointmentType,
+    String notes = '',
+  }) async {
+    try {
+      final response = await _dio.post(
+        '/appointments',
+        data: {
+          'referral_id': referralId,
+          'child_id': childId,
+          'scheduled_date': scheduledDate,
+          'appointment_type': appointmentType,
+          'notes': notes,
+        },
+      );
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw Exception('Appointment create failed: ${e.message}');
+    }
+  }
+
+  Future<Map<String, dynamic>> updateAppointmentStatus({
+    required String appointmentId,
+    required String status,
+    String notes = '',
+  }) async {
+    try {
+      final response = await _dio.put(
+        '/appointments/$appointmentId',
+        data: {'status': status, 'notes': notes},
+      );
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw Exception('Appointment update failed: ${e.message}');
+    }
+  }
+
+  Future<Map<String, dynamic>> getReferralAppointments(
+    String referralId,
+  ) async {
+    try {
+      final response = await _dio.get('/referral/$referralId/appointments');
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw Exception('Appointment fetch failed: ${e.message}');
+    }
+  }
+
+  Future<Map<String, dynamic>> updateReferralStatus({
+    required String referralId,
+    required String status,
+    String? appointmentDate,
+    String? completionDate,
+    String? workerId,
+  }) async {
+    final candidates = <String>[
+      _statusForBackend(status),
+      status,
+      _statusForLegacy(status),
+    ].where((e) => e.trim().isNotEmpty).toSet().toList();
+
+    DioException? lastError;
+    for (final candidate in candidates) {
+      try {
+        final response = await _dio.post(
+          '/referral/$referralId/status',
+          data: {
+            'status': candidate,
+            'appointment_date': ?appointmentDate,
+            'completion_date': ?completionDate,
+            'worker_id': ?workerId,
+          },
+        );
+        return response.data as Map<String, dynamic>;
+      } on DioException catch (e) {
+        lastError = e;
+      }
+    }
+
+    // Fallback for older backend variants.
+    try {
+      final response = await _dio.post(
+        '/referral/status',
+        data: {
+          'referral_id': referralId,
+          'status': _statusForLegacy(status),
+          'appointment_date': ?appointmentDate,
+          'completion_date': ?completionDate,
+          'worker_id': ?workerId,
+        },
+      );
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      lastError = e;
+    }
+
+    try {
+      final response = await _dio.put(
+        '/update_referral_status',
+        queryParameters: {
+          'referral_id': referralId,
+          'status': _statusForLegacy(status),
+          'appointment_date': ?appointmentDate,
+          'completion_date': ?completionDate,
+          'worker_id': ?workerId,
+        },
+      );
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      lastError = e;
+    }
+
+    try {
+      final response = await _dio.post(
+        '/update_referral_status',
+        queryParameters: {
+          'referral_id': referralId,
+          'status': _statusForLegacy(status),
+          'appointment_date': ?appointmentDate,
+          'completion_date': ?completionDate,
+          'worker_id': ?workerId,
+        },
+      );
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      lastError = e;
+    }
+
+    final code = lastError.response?.statusCode;
+    throw Exception(
+      'Referral status update failed: ${lastError.message} (HTTP $code)',
+    );
+  }
+
+  Future<Map<String, dynamic>> escalateReferral({
+    required String referralId,
+    String? workerId,
+  }) async {
+    try {
+      final response = await _dio.post(
+        '/referral/$referralId/escalate',
+        data: {'worker_id': ?workerId},
+      );
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw Exception('Referral escalation failed: ${e.message}');
+    }
+  }
+
+  String _statusForBackend(String status) {
+    switch (status.trim().toUpperCase()) {
+      case 'SCHEDULED':
+        return 'Appointment Scheduled';
+      case 'VISITED':
+        return 'Under Treatment';
+      case 'COMPLETED':
+        return 'Completed';
+      case 'MISSED':
+        return 'Missed';
+      default:
+        return 'Pending';
+    }
+  }
+
+  String _statusForLegacy(String status) {
+    switch (status.trim().toUpperCase()) {
+      case 'SCHEDULED':
+        return 'SCHEDULED';
+      case 'VISITED':
+        return 'UNDER_TREATMENT';
+      case 'COMPLETED':
+        return 'COMPLETED';
+      case 'MISSED':
+        return 'MISSED';
+      default:
+        return 'PENDING';
+    }
+  }
+
+  Future<Map<String, dynamic>> getReferralByChild(String childId) async {
+    try {
+      final response = await _dio.get('/referral/by-child/$childId');
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw Exception('Referral fetch failed: ${e.message}');
+    }
+  }
+
+  Future<Map<String, dynamic>> getReferralDetailsByChild(String childId) async {
+    try {
+      final response = await _dio.get('/referral/child/$childId/details');
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw Exception('Referral details fetch failed: ${e.message}');
+    }
+  }
+
   Future<Map<String, dynamic>> resetProblemBFrequency({
     required String childId,
     required String frequencyType,
@@ -265,10 +476,7 @@ class APIService {
     try {
       final response = await _dio.post(
         '/problem-b/activities/reset-frequency',
-        data: {
-          'child_id': childId,
-          'frequency_type': frequencyType,
-        },
+        data: {'child_id': childId, 'frequency_type': frequencyType},
       );
       return response.data as Map<String, dynamic>;
     } on DioException catch (e) {
@@ -276,4 +484,69 @@ class APIService {
     }
   }
 
+  Future<Map<String, dynamic>> createInterventionPhase({
+    required String childId,
+    required String domain,
+    required String riskLevel,
+    required int baselineDelayMonths,
+    required int ageMonths,
+  }) async {
+    try {
+      final response = await _dio.post(
+        '/intervention/plan/create',
+        data: {
+          'child_id': childId,
+          'domain': domain,
+          'risk_level': riskLevel,
+          'baseline_delay_months': baselineDelayMonths,
+          'age_months': ageMonths,
+        },
+      );
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw Exception('Intervention phase create failed: ${e.message}');
+    }
+  }
+
+  Future<Map<String, dynamic>> logInterventionProgress({
+    required String phaseId,
+    required double currentDelayMonths,
+    required int awwCompleted,
+    required int caregiverCompleted,
+    String notes = '',
+  }) async {
+    try {
+      final response = await _dio.post(
+        '/intervention/$phaseId/progress/log',
+        data: {
+          'phase_id': phaseId,
+          'current_delay_months': currentDelayMonths,
+          'aww_completed': awwCompleted,
+          'caregiver_completed': caregiverCompleted,
+          'notes': notes,
+        },
+      );
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw Exception('Intervention progress log failed: ${e.message}');
+    }
+  }
+
+  Future<Map<String, dynamic>> getInterventionActivities(String phaseId) async {
+    try {
+      final response = await _dio.get('/intervention/$phaseId/activities');
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw Exception('Intervention activities fetch failed: ${e.message}');
+    }
+  }
+
+  Future<Map<String, dynamic>> getInterventionHistory(String phaseId) async {
+    try {
+      final response = await _dio.get('/intervention/$phaseId/history');
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw Exception('Intervention history fetch failed: ${e.message}');
+    }
+  }
 }

@@ -277,17 +277,62 @@ def build_activity_master_rows(
     return rows
 
 
-def _target_milestone(delayed_domains: List[str]) -> str:
-    if "LC" in delayed_domains:
-        return "Use 2-word meaningful phrases consistently"
-    if "GM" in delayed_domains:
-        return "Climb stairs with minimal support"
-    if "FM" in delayed_domains:
-        return "Improve grasp and controlled hand movement"
-    if "SE" in delayed_domains:
-        return "Participate in turn-taking social play"
-    if "COG" in delayed_domains:
-        return "Complete age-appropriate sorting and memory tasks"
+_MILESTONE_LIBRARY: Dict[str, Dict[str, str]] = {
+    "LC": {
+        "Infant 1": "Responds to name and babbles consistently",
+        "Infant 2": "Uses simple single words with intent",
+        "Toddler 1": "Combines 2-word phrases with prompting",
+        "Toddler 2": "Uses 2-3 word phrases independently",
+        "Preschool 1": "Speaks in short sentences with clarity",
+        "Preschool 2": "Narrates simple events in sequence",
+        "Preschool 3": "Uses age-appropriate sentences and vocabulary",
+    },
+    "GM": {
+        "Infant 1": "Sits with support and rolls both ways",
+        "Infant 2": "Stands with support and cruises",
+        "Toddler 1": "Walks steadily and climbs low steps",
+        "Toddler 2": "Climbs stairs with minimal support",
+        "Preschool 1": "Jumps forward and balances briefly",
+        "Preschool 2": "Runs and changes direction safely",
+        "Preschool 3": "Hops on one foot and climbs confidently",
+    },
+    "FM": {
+        "Infant 1": "Reaches and grasps objects intentionally",
+        "Infant 2": "Transfers objects hand-to-hand",
+        "Toddler 1": "Stacks 4-5 blocks with control",
+        "Toddler 2": "Draws lines/circles with guidance",
+        "Preschool 1": "Stacks 6-8 blocks and uses crayons",
+        "Preschool 2": "Uses scissors and buttons with help",
+        "Preschool 3": "Draws simple shapes and writes strokes",
+    },
+    "COG": {
+        "Infant 1": "Finds hidden objects with cue",
+        "Infant 2": "Matches simple shapes/objects",
+        "Toddler 1": "Sorts by color/shape with guidance",
+        "Toddler 2": "Completes simple puzzles independently",
+        "Preschool 1": "Matches patterns and sequences 3 steps",
+        "Preschool 2": "Counts small sets and solves simple tasks",
+        "Preschool 3": "Follows 3-step sequences accurately",
+    },
+    "SE": {
+        "Infant 1": "Smiles and responds to caregiver interaction",
+        "Infant 2": "Imitates gestures and enjoys shared play",
+        "Toddler 1": "Participates in turn-taking with support",
+        "Toddler 2": "Uses emotion words during play",
+        "Preschool 1": "Shares toys and plays cooperatively",
+        "Preschool 2": "Follows social rules in group play",
+        "Preschool 3": "Shows empathy and manages simple conflicts",
+    },
+}
+
+
+def _target_milestone(delayed_domains: List[str], age_band: str) -> str:
+    for domain in ["LC", "GM", "FM", "COG", "SE"]:
+        if domain in delayed_domains:
+            return _MILESTONE_LIBRARY.get(domain, {}).get(
+                age_band,
+                "Maintain age-appropriate developmental trajectory",
+            )
     return "Maintain age-appropriate developmental trajectory"
 
 
@@ -355,7 +400,7 @@ def assign_activities_for_child(
         "phase_start_date": today.isoformat(),
         "phase_end_date": phase_end.isoformat(),
         "expected_improvement_window": _expected_improvement(severity_level),
-        "target_milestone": _target_milestone(delayed_domains),
+        "target_milestone": _target_milestone(delayed_domains, age_band),
         "domains": delayed_domains,
         "total_activities": len(assigned),
         "daily_count": sum(1 for a in assigned if a["activity_type"] == "daily_core"),

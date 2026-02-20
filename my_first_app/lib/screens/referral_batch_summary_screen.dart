@@ -42,8 +42,7 @@ class _ReferralBatchSummaryScreenState extends State<ReferralBatchSummaryScreen>
       if (widget.childId == null) {
         _models = db.getAllReferrals();
       } else {
-        final items = db.getChildReferrals(widget.childId!);
-        _models = items.isEmpty ? db.getAllReferrals() : items;
+        _models = db.getChildReferrals(widget.childId!);
       }
     } catch (e) {
       _models = [];
@@ -101,6 +100,7 @@ class _ReferralBatchSummaryScreenState extends State<ReferralBatchSummaryScreen>
     switch (value) {
       case 'Immediate':
         return l10n.t('urgency_immediate');
+      case 'Priority':
       case 'Urgent':
         return l10n.t('urgency_urgent');
       default:
@@ -112,8 +112,8 @@ class _ReferralBatchSummaryScreenState extends State<ReferralBatchSummaryScreen>
     switch (urgency) {
       case ReferralUrgency.immediate:
         return 'Immediate';
-      case ReferralUrgency.urgent:
-        return 'Urgent';
+      case ReferralUrgency.priority:
+        return 'Priority';
       default:
         return 'Normal';
     }
@@ -466,35 +466,35 @@ class _ReferralBatchSummaryScreenState extends State<ReferralBatchSummaryScreen>
 
   List<ReferralSummaryItem> _buildReferrals(AppLocalizations l10n) {
     if (_provided.isNotEmpty) {
-      final filtered = _provided.where((r) => _isCritical(r.overallRisk)).toList();
-      filtered.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-      return filtered;
+      final provided = List<ReferralSummaryItem>.from(_provided);
+      provided.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return provided;
     }
     if (_models.isEmpty) {
       return [];
     }
-    final list = _models.map((model) => _fromModel(model, l10n)).where((r) => _isCritical(r.overallRisk)).toList();
+    final list = _models.map((model) => _fromModel(model, l10n)).toList();
     list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return list;
   }
 
-  bool _isCritical(String risk) => risk.trim().toLowerCase() == 'critical';
-
   ReferralSummaryItem _fromModel(ReferralModel model, AppLocalizations l10n) {
     final meta = model.metadata ?? {};
-    final domainKey = meta['domain'] as String?;
-    final domainRisk = meta['domain_risk'] as String?;
-    final overallRisk = (meta['overall_risk'] as String?) ??
-        (domainRisk ?? 'low');
+    final domainKey = (meta['domain'] as String?) ?? '';
+    final domainRisk = (meta['domain_risk'] as String?) ?? (meta['risk_level'] as String?) ?? 'low';
+    final overallRisk = (meta['risk_level'] as String?) ?? (meta['overall_risk'] as String?) ?? domainRisk;
     final referralTypeLabel = (meta['referral_type_label'] as String?) ?? _referralTypeFallback(model.referralType);
     final ageMonthsValue = meta['age_months'];
     final ageMonths = ageMonthsValue is int
         ? ageMonthsValue
         : int.tryParse(ageMonthsValue?.toString() ?? '') ?? 0;
     final reasons = <String>[];
-    if (domainKey != null && domainKey.isNotEmpty) {
+    final domainReason = (meta['domain_reason'] as String?) ?? '';
+    if (domainReason.isNotEmpty) {
+      reasons.add(domainReason);
+    } else if (domainKey.isNotEmpty) {
       final label = _domainLabel(domainKey, l10n);
-      if (domainRisk != null && domainRisk.isNotEmpty) {
+      if (domainRisk.isNotEmpty) {
         reasons.add('$label (${_riskLabel(domainRisk, l10n)})');
       } else {
         reasons.add(label);
@@ -519,14 +519,12 @@ class _ReferralBatchSummaryScreenState extends State<ReferralBatchSummaryScreen>
 
   String _referralTypeFallback(ReferralType type) {
     switch (type) {
-      case ReferralType.phc:
-        return 'PHC';
-      case ReferralType.rbsk:
-        return 'RBSK';
-      case ReferralType.specialist:
-        return 'Specialist';
-      case ReferralType.educational:
-        return 'Educational';
+      case ReferralType.enhancedMonitoring:
+        return 'Enhanced Monitoring';
+      case ReferralType.specialistEvaluation:
+        return 'Specialist Evaluation';
+      case ReferralType.immediateSpecialistReferral:
+        return 'Immediate Specialist Referral';
     }
   }
 
