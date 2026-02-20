@@ -1,194 +1,514 @@
+"""
+Problem B Service: Strict Intervention Lifecycle Implementation
+Core logic follows: Risk → Phase → Activities → Compliance → Review → Decision → Referral
+"""
+
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+import sqlite3
+import uuid
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional
 
 
-def generate_intervention_plan(child: Dict) -> Dict:
-    plan = {
-        "center_activities": [],
-        "home_activities": [],
-        "intensity": "Routine",
-    }
+class ProblemBService:
+    """
+    Strict Problem B lifecycle engine.
+    
+    Flow:
+    1. Create phase from risk
+    2. Auto-generate activities
+    3. Track compliance weekly
+    4. Run review on interval
+    5. Auto-escalate if needed
+    6. Create referral only if escalation triggered
+    """
 
-    gm_delay = int(child.get("gm_delay", 0))
-    fm_delay = int(child.get("fm_delay", 0))
-    lc_delay = int(child.get("lc_delay", 0))
-    cog_delay = int(child.get("cog_delay", 0))
-    se_delay = int(child.get("se_delay", 0))
-    risk_category = str(child.get("risk_category", "Low")).lower()
+    # Fixed thresholds (non-negotiable)
+    ADHERENCE_THRESHOLD = 0.6  # 60%
+    ESCALATION_THRESHOLD = 0.4  # 40%
+    REVIEW_INTERVAL_DAYS = 42  # 6 weeks
+    IMPROVEMENT_THRESHOLD = 1.0  # 1 month
 
-    if gm_delay > 2:
-        plan["center_activities"].append("Structured balance play")
-        plan["home_activities"].append("Climb stairs with supervision")
+    def __init__(self, db_path: str = "problem_b.db"):
+        self.db_path = db_path
+        self._ensure_db()
 
-    if fm_delay > 2:
-        plan["center_activities"].append("Block stacking practice")
-        plan["home_activities"].append("Drawing and spoon transfer practice")
+    def _get_conn(self, db_path: str):
+        """Get database connection context manager"""
+        class DBConnection:
+            def __init__(self, path):
+                self.path = path
+                self.conn = None
 
-    if lc_delay > 3:
-        plan["center_activities"].append("Storytelling circle (15 mins)")
-        plan["home_activities"].append("Name 5 objects daily")
-        plan["home_activities"].append("Expand 2-word phrases")
+            def __enter__(self):
+                self.conn = sqlite3.connect(self.path)
+                self.conn.row_factory = sqlite3.Row
+                return self.conn
 
-    if se_delay > 2:
-        plan["center_activities"].append("Peer play session")
-        plan["home_activities"].append("Emotion naming practice")
+            def __exit__(self, *args):
+                if self.conn:
+                    self.conn.commit()
+                    self.conn.close()
 
-    if cog_delay > 2:
-        plan["center_activities"].append("Shape sorting and memory games")
-        plan["home_activities"].append("Memory card game")
+        return DBConnection(db_path)
 
-    if risk_category == "critical":
-        plan["intensity"] = "High (Daily)"
-    elif risk_category == "high":
-        plan["intensity"] = "Moderate (5x/week)"
-    elif risk_category == "medium":
-        plan["intensity"] = "Low (3x/week)"
+    def _ensure_db(self):
+        """Ensure database tables exist."""
+        with self._get_conn(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='intervention_phase'"
+            )
+            if not cursor.fetchone():
+                schema_path = __file__.replace("problem_b_service.py", "problem_b_schema.sql")
+                try:
+                    with open(schema_path, "r", encoding="utf-8") as f:
+                        conn.executescript(f.read())
+                    conn.commit()
+                except Exception as e:
+                    print(f"Warning: could not initialize Problem B schema: {e}")
 
-    plan["center_activities"] = _dedupe(plan["center_activities"])
-    plan["home_activities"] = _dedupe(plan["home_activities"])
-    return plan
+    # =========================================================================
+    # PHASE 1: CREATE INTERVENTION PHASE
+    # =========================================================================
+
+    def create_intervention_phase(self, child_id: str, domain: str, severity: str,
+                                baseline_delay: float, age_months: int) -> Dict:
+        """
+        Create intervention phase from risk assessment.
+        Automatically triggers activity generation.
+        """
+        try:
+            phase_id = f"phase_{uuid.uuid4().hex[:12]}"
+            start_date = datetime.now()
+            end_date = start_date + timedelta(days=self.REVIEW_INTERVAL_DAYS)
+            next_review = end_date
+
+            with self._get_conn(self.db_path) as conn:
+                cursor = conn.cursor()
+
+                # Insert phase
+                cursor.execute(
+                    """
+                    INSERT INTO intervention_phase 
+                    (phase_id, child_id, domain, severity, baseline_delay, 
+                     start_date, review_date, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE')
+                    """,
+                    (phase_id, child_id, domain, severity, baseline_delay,
+                     start_date.isoformat(), next_review.isoformat()),
+                )
+                conn.commit()
+
+            # AUTO-GENERATE ACTIVITIES
+            activities = self._generate_activities_auto(domain, severity, age_months)
+
+            with self._get_conn(self.db_path) as conn:
+                cursor = conn.cursor()
+                for act in activities:
+                    activity_id = f"act_{uuid.uuid4().hex[:12]}"
+                    cursor.execute(
+                        """
+                        INSERT INTO activities
+                        (activity_id, phase_id, domain, role, name, frequency_per_week)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (activity_id, phase_id, domain, act["role"], 
+                         act["name"], act["frequency_per_week"]),
+                    )
+                conn.commit()
+
+            return {
+                "phase_id": phase_id,
+                "status": "ACTIVE",
+                "domain": domain,
+                "severity": severity,
+                "baseline_delay": baseline_delay,
+                "start_date": start_date.isoformat(),
+                "review_date": next_review.isoformat(),
+                "activities_generated": len(activities),
+            }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    # =========================================================================
+    # PHASE 2: AUTO-GENERATE ACTIVITIES (AI Engine)
+    # =========================================================================
+
+    def _generate_activities_auto(self, domain: str, severity: str, 
+                                 age_months: int) -> List[Dict]:
+        """
+        Automatically generate activities based on:
+        - Domain (FM, GM, LC, COG, SE)
+        - Severity (LOW, MEDIUM, HIGH, CRITICAL)
+        - Age band
+        
+        Returns list of activities ready to insert.
+        """
+        activities = []
+
+        # Determine frequency based on severity
+        if severity == "CRITICAL":
+            aww_freq = 5  # 5 days/week
+            cg_freq = 5
+        elif severity == "HIGH":
+            aww_freq = 5
+            cg_freq = 4
+        else:
+            aww_freq = 3
+            cg_freq = 3
+
+        # Domain-specific template
+        templates = {
+            "FM": [  # Fine Motor
+                {"role": "AWW", "name": "Grip strengthening exercises"},
+                {"role": "Caregiver", "name": "Play dough manipulation"},
+            ],
+            "GM": [  # Gross Motor
+                {"role": "AWW", "name": "Core strength building"},
+                {"role": "Caregiver", "name": "Walking and climbing practice"},
+            ],
+            "LC": [  # Language & Communication
+                {"role": "AWW", "name": "Vocabulary building"},
+                {"role": "Caregiver", "name": "Story and rhyme practice"},
+            ],
+            "COG": [  # Cognitive
+                {"role": "AWW", "name": "Object recognition"},
+                {"role": "Caregiver", "name": "Problem solving puzzles"},
+            ],
+            "SE": [  # Social-Emotional
+                {"role": "AWW", "name": "Emotion recognition"},
+                {"role": "Caregiver", "name": "Bonding and play activities"},
+            ],
+        }
+
+        # Get templates for this domain
+        domain_templates = templates.get(domain, [])
+
+        for template in domain_templates:
+            freq = aww_freq if template["role"] == "AWW" else cg_freq
+            activities.append({
+                "role": template["role"],
+                "name": template["name"],
+                "frequency_per_week": freq,
+            })
+
+        return activities
+
+    # =========================================================================
+    # PHASE 3: COMPLIANCE CALCULATION (Weekly)
+    # =========================================================================
+
+    def calculate_compliance(self, phase_id: str) -> float:
+        """
+        Calculate weekly compliance percentage.
+        compliance = (completed_tasks / total_tasks) * 100
+        """
+        try:
+            with self._get_conn(self.db_path) as conn:
+                cursor = conn.cursor()
+
+                # Total tasks this week
+                cursor.execute(
+                    """
+                    SELECT COUNT(*) as total FROM activities WHERE phase_id = ?
+                    """,
+                    (phase_id,),
+                )
+                total = cursor.fetchone()["total"]
+
+                if total == 0:
+                    return 0.0
+
+                # Completed tasks this week
+                week_ago = (datetime.now() - timedelta(days=7)).isoformat()
+                cursor.execute(
+                    """
+                    SELECT COUNT(*) as completed FROM task_logs 
+                    WHERE activity_id IN (SELECT activity_id FROM activities WHERE phase_id = ?)
+                    AND completed = 1 
+                    AND date_logged > ?
+                    """,
+                    (phase_id, week_ago),
+                )
+                completed = cursor.fetchone()["completed"]
+
+                compliance = (completed / total) * 100
+                return compliance / 100  # Return as decimal (0.75 = 75%)
+
+        except Exception as e:
+            print(f"Error calculating compliance: {e}")
+            return 0.0
+
+    # =========================================================================
+    # PHASE 4: IMPROVEMENT CALCULATION
+    # =========================================================================
+
+    def calculate_improvement(self, phase_id: str, current_delay: float) -> float:
+        """
+        improvement = baseline_delay - current_delay
+        """
+        try:
+            with self._get_conn(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT baseline_delay FROM intervention_phase WHERE phase_id = ?",
+                    (phase_id,),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return 0.0
+
+                baseline = row["baseline_delay"]
+                improvement = baseline - current_delay
+                return improvement
+
+        except Exception as e:
+            print(f"Error calculating improvement: {e}")
+            return 0.0
+
+    # =========================================================================
+    # PHASE 5: REVIEW ENGINE (Core Problem B Logic)
+    # =========================================================================
+
+    def run_review_engine(self, phase_id: str, current_delay: float) -> Dict:
+        """
+        Core decision engine. Runs every review interval.
+        
+        Rules:
+        1. If compliance < 40% → INTENSIFY
+        2. If no improvement after 2 reviews → ESCALATE  
+        3. If worsening trend → ESCALATE
+        4. Else → CONTINUE
+        """
+        try:
+            compliance = self.calculate_compliance(phase_id)
+            improvement = self.calculate_improvement(phase_id, current_delay)
+
+            # Check previous reviews
+            with self._get_conn(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT COUNT(*) as count FROM review_log WHERE phase_id = ?",
+                    (phase_id,),
+                )
+                review_count = cursor.fetchone()["count"]
+
+            decision = "CONTINUE"
+            reason = "Progress on track"
+
+            # RULE 1: Poor adherence
+            if compliance < self.ESCALATION_THRESHOLD:
+                decision = "INTENSIFY"
+                reason = f"Low adherence: {compliance*100:.1f}% < {self.ESCALATION_THRESHOLD*100}%"
+                # Auto-intensify plan
+                self._intensify_plan(phase_id)
+
+            # RULE 2: No improvement after 2 reviews
+            elif improvement <= 0 and review_count >= 2:
+                decision = "ESCALATE"
+                reason = "No improvement after multiple reviews - escalating to specialist"
+                # Auto-create referral
+                self._create_referral(phase_id)
+
+            # RULE 3: Worsening trend
+            elif improvement < 0:
+                decision = "ESCALATE"
+                reason = "Worsening trend detected - requires specialist intervention"
+                # Auto-create referral
+                self._create_referral(phase_id)
+
+            # Store review
+            review_id = f"review_{uuid.uuid4().hex[:12]}"
+            with self._get_conn(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO review_log
+                    (review_id, phase_id, review_date, compliance, improvement, decision_action, decision_reason)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (review_id, phase_id, datetime.now().isoformat(),
+                     compliance * 100, improvement, decision, reason),
+                )
+                conn.commit()
+
+            return {
+                "review_id": review_id,
+                "compliance": compliance,
+                "improvement": improvement,
+                "decision": decision,
+                "reason": reason,
+                "review_count": review_count + 1,
+            }
+
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    # =========================================================================
+    # PHASE 6: AUTO-INTENSIFY PLAN
+    # =========================================================================
+
+    def _intensify_plan(self, phase_id: str) -> None:
+        """
+        Automatically increase activity frequency when adherence is low.
+        """
+        try:
+            with self._get_conn(self.db_path) as conn:
+                cursor = conn.cursor()
+                # Increase frequency by 1 for all activities
+                cursor.execute(
+                    """
+                    UPDATE activities 
+                    SET frequency_per_week = frequency_per_week + 1
+                    WHERE phase_id = ?
+                    """,
+                    (phase_id,),
+                )
+                conn.commit()
+                print(f"Plan intensified for phase {phase_id}")
+
+        except Exception as e:
+            print(f"Error intensifying plan: {e}")
+
+    # =========================================================================
+    # PHASE 7: AUTO-CREATE REFERRAL (on escalation)
+    # =========================================================================
+
+    def _create_referral(self, phase_id: str) -> Dict:
+        """
+        Automatically create referral when escalation is triggered.
+        This is CONDITIONAL - only called during escalation decision.
+        """
+        try:
+            with self._get_conn(self.db_path) as conn:
+                cursor = conn.cursor()
+
+                # Get phase details
+                cursor.execute(
+                    "SELECT child_id, domain, severity FROM intervention_phase WHERE phase_id = ?",
+                    (phase_id,),
+                )
+                phase = cursor.fetchone()
+
+                if not phase:
+                    return {"status": "error", "message": "Phase not found"}
+
+                # Create referral
+                referral_id = f"ref_{uuid.uuid4().hex[:12]}"
+                cursor.execute(
+                    """
+                    INSERT INTO referral
+                    (referral_id, child_id, domain, urgency, status, created_on)
+                    VALUES (?, ?, ?, 'IMMEDIATE', 'PENDING', ?)
+                    """,
+                    (referral_id, phase["child_id"], phase["domain"],
+                     datetime.now().isoformat()),
+                )
+
+                # Update phase status
+                cursor.execute(
+                    "UPDATE intervention_phase SET status = 'ESCALATED' WHERE phase_id = ?",
+                    (phase_id,),
+                )
+                conn.commit()
+
+                return {
+                    "referral_id": referral_id,
+                    "child_id": phase["child_id"],
+                    "domain": phase["domain"],
+                    "status": "PENDING",
+                    "urgency": "IMMEDIATE",
+                }
+
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    # =========================================================================
+    # UTILITY: Log Activity Completion
+    # =========================================================================
+
+    def log_activity_completion(self, activity_id: str) -> Dict:
+        """
+        Log when AWW or Caregiver completes an activity.
+        """
+        try:
+            with self._get_conn(self.db_path) as conn:
+                cursor = conn.cursor()
+                task_id = f"task_{uuid.uuid4().hex[:12]}"
+                cursor.execute(
+                    """
+                    INSERT INTO task_logs
+                    (task_id, activity_id, date_logged, completed)
+                    VALUES (?, ?, ?, 1)
+                    """,
+                    (task_id, activity_id, datetime.now().isoformat()),
+                )
+                conn.commit()
+
+            return {"status": "ok", "task_id": task_id}
+
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    # =========================================================================
+    # UTILITY: Get Phase Status
+    # =========================================================================
+
+    def get_phase_status(self, phase_id: str) -> Dict:
+        """
+        Get current phase status with all metrics.
+        """
+        try:
+            with self._get_conn(self.db_path) as conn:
+                cursor = conn.cursor()
+
+                # Get phase
+                cursor.execute(
+                    "SELECT * FROM intervention_phase WHERE phase_id = ?",
+                    (phase_id,),
+                )
+                phase = cursor.fetchone()
+
+                if not phase:
+                    return {"status": "error", "message": "Phase not found"}
+
+                # Get activities
+                cursor.execute(
+                    "SELECT COUNT(*) as count FROM activities WHERE phase_id = ?",
+                    (phase_id,),
+                )
+                activity_count = cursor.fetchone()["count"]
+
+                compliance = self.calculate_compliance(phase_id)
+
+                # Get latest review
+                cursor.execute(
+                    """
+                    SELECT * FROM review_log WHERE phase_id = ? 
+                    ORDER BY review_date DESC LIMIT 1
+                    """,
+                    (phase_id,),
+                )
+                latest_review = cursor.fetchone()
+
+                return {
+                    "phase_id": phase_id,
+                    "child_id": phase["child_id"],
+                    "domain": phase["domain"],
+                    "severity": phase["severity"],
+                    "status": phase["status"],
+                    "baseline_delay": phase["baseline_delay"],
+                    "activities_count": activity_count,
+                    "compliance": compliance,
+                    "latest_review": dict(latest_review) if latest_review else None,
+                    "review_date": phase["review_date"],
+                }
+
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
 
 
-def calculate_trend(baseline: int, followup: int) -> Tuple[int, str]:
-    reduction = baseline - followup
-    if reduction > 2:
-        trend = "Improving"
-    elif reduction >= 0:
-        trend = "Stable"
-    else:
-        trend = "Worsening"
-    return reduction, trend
-
-
-def adjust_intensity(current_intensity: str, trend: str) -> str:
-    if trend == "Improving":
-        return "Reduce intensity"
-    if trend == "Worsening":
-        return "Escalate referral"
-    return current_intensity
-
-
-def next_review_decision(current_intensity: str, reduction: int, trend: str) -> str:
-    if trend == "Worsening":
-        return "Escalate referral"
-    if reduction > 2:
-        return "Reduce intensity"
-    if trend == "Stable":
-        return "Continue"
-    return adjust_intensity(current_intensity, trend)
-
-
-def rule_logic_table() -> Dict[str, List[Dict[str, str]]]:
-    return {
-        "domain_rules": [
-            {"condition": "GM_delay > 2", "intervention": "Balance play + Climbing"},
-            {"condition": "FM_delay > 2", "intervention": "Block stacking + Drawing"},
-            {"condition": "LC_delay > 3", "intervention": "Storytelling + Object naming"},
-            {"condition": "SE_delay > 2", "intervention": "Peer play + Emotion naming"},
-            {"condition": "COG_delay > 2", "intervention": "Shape sorting + Memory games"},
-        ],
-        "intensity_rules": [
-            {"severity": "Critical", "intensity": "High (Daily)"},
-            {"severity": "High", "intensity": "Moderate (5x/week)"},
-            {"severity": "Medium", "intensity": "Low (3x/week)"},
-            {"severity": "Low", "intensity": "Routine"},
-        ],
-        "escalation_rules": [
-            {"condition": "No improvement 2 reviews", "action": "Escalate"},
-            {"condition": "Worsening", "action": "Referral"},
-            {"condition": "Improvement >2 months", "action": "Reduce intensity"},
-        ],
-    }
-
-
-def schema_tables() -> Dict[str, List[str]]:
-    return {
-        "child_profile": [
-            "child_id (PK)",
-            "name",
-            "dob",
-            "age_months",
-            "gender",
-            "awc_code",
-            "sector",
-            "mandal",
-            "district",
-            "state",
-        ],
-        "developmental_risk": [
-            "risk_id (PK)",
-            "child_id (FK)",
-            "gm_delay_months",
-            "fm_delay_months",
-            "lc_delay_months",
-            "cog_delay_months",
-            "se_delay_months",
-            "num_delays",
-            "risk_score",
-            "risk_category",
-            "assessment_date",
-        ],
-        "neuro_behavioral": [
-            "child_id (FK)",
-            "autism_risk",
-            "adhd_risk",
-            "behavioral_risk",
-        ],
-        "intervention_plan": [
-            "plan_id (PK)",
-            "child_id (FK)",
-            "intensity_level",
-            "start_date",
-            "review_date",
-            "active_status",
-        ],
-        "intervention_activities": [
-            "activity_id (PK)",
-            "plan_id (FK)",
-            "domain",
-            "activity_type",
-            "description",
-            "frequency",
-        ],
-        "referral": [
-            "referral_id (PK)",
-            "child_id (FK)",
-            "referral_type",
-            "urgency",
-            "status",
-            "created_date",
-            "followup_date",
-            "reason",
-        ],
-        "followup_assessment": [
-            "followup_id (PK)",
-            "child_id (FK)",
-            "gm_delay",
-            "fm_delay",
-            "lc_delay",
-            "cog_delay",
-            "se_delay",
-            "assessment_date",
-            "trend_status",
-            "delay_reduction",
-        ],
-        "caregiver_engagement": [
-            "engagement_id (PK)",
-            "child_id (FK)",
-            "mode",
-            "last_nudge_date",
-            "compliance_score",
-        ],
-    }
-
-
-def _dedupe(items: List[str]) -> List[str]:
-    seen = set()
-    out: List[str] = []
-    for item in items:
-        if item in seen:
-            continue
-        seen.add(item)
-        out.append(item)
-    return out
+# Singleton instance
+problem_b_service = ProblemBService()

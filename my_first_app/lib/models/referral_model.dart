@@ -1,11 +1,15 @@
-/// Referral types
-enum ReferralType { rbsk, phc, specialist, educational }
+/// Problem B referral tiers.
+enum ReferralType {
+  enhancedMonitoring,
+  specialistEvaluation,
+  immediateSpecialistReferral,
+}
 
-/// Referral urgency levels
-enum ReferralUrgency { normal, urgent, immediate }
+/// Problem B urgency levels
+enum ReferralUrgency { normal, priority, immediate }
 
-/// Referral status
-enum ReferralStatus { pending, scheduled, completed, underTreatment, cancelled }
+/// Problem B referral lifecycle status (strict 4 states)
+enum ReferralStatus { pending, scheduled, completed, underTreatment }
 
 /// Model representing a Referral
 class ReferralModel {
@@ -45,16 +49,13 @@ class ReferralModel {
       screeningId: json['screening_id'] ?? '',
       childId: json['child_id'] ?? '',
       awwId: json['aww_id'] ?? '',
-      referralType: ReferralType.values.firstWhere(
-        (e) => e.toString().split('.').last == (json['referral_type'] ?? 'rbsk'),
-        orElse: () => ReferralType.rbsk,
-      ),
+      referralType: _referralTypeFromJson(json['referral_type']),
       urgency: ReferralUrgency.values.firstWhere(
-        (e) => e.toString().split('.').last == (json['urgency'] ?? 'normal'),
+        (e) => e.toString().split('.').last.toLowerCase() == (json['urgency'] ?? 'normal').toString().toLowerCase(),
         orElse: () => ReferralUrgency.normal,
       ),
       status: ReferralStatus.values.firstWhere(
-        (e) => e.toString().split('.').last.toLowerCase() == (json['status'] ?? 'pending').toString().replaceAll('_', '').toLowerCase(),
+        (e) => e.toString().split('.').last.toLowerCase() == (json['status'] ?? 'pending').toString().replaceAll('_', '').replaceAll(' ', '').toLowerCase(),
         orElse: () => ReferralStatus.pending,
       ),
       notes: json['notes'],
@@ -82,6 +83,27 @@ class ReferralModel {
       'referred_to': referredTo,
       'metadata': metadata,
     };
+  }
+
+  static ReferralType _referralTypeFromJson(dynamic raw) {
+    final value = (raw ?? '').toString().trim().toLowerCase();
+    if (value == 'immediate_specialist_referral') {
+      return ReferralType.immediateSpecialistReferral;
+    }
+    if (value == 'specialist_evaluation') {
+      return ReferralType.specialistEvaluation;
+    }
+    if (value == 'enhanced_monitoring') {
+      return ReferralType.enhancedMonitoring;
+    }
+    // Backward-compatible parsing.
+    if (value == 'phc' || value == 'specialist') {
+      return ReferralType.specialistEvaluation;
+    }
+    if (value == 'rbsk') {
+      return ReferralType.enhancedMonitoring;
+    }
+    return ReferralType.enhancedMonitoring;
   }
 
   ReferralModel copyWith({

@@ -67,6 +67,10 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
   String _engineEscalationDecision = 'Continue';
   String _engineNextAction = 'Continue_Current_Plan';
   Map<String, dynamic> _enginePlanRegen = <String, dynamic>{};
+  List<_Appointment> _appointments = <_Appointment>[];
+  String _computedReferralStatus = 'Pending';
+  String _suggestedReferralStatus = 'Pending';
+  _Appointment? _nextAppointment;
   DateTime? _caregiverFromDate;
   DateTime? _caregiverToDate;
   DateTime? _awwFromDate;
@@ -100,10 +104,140 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
       if (child.length > 1) _previous = child[1];
       _computeCohort();
       await _loadEngineActivities();
+      await _loadAppointments();
     } catch (_) {
       // Keep view usable even without local records.
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _loadAppointments() async {
+    try {
+      final api = APIService();
+      final response = await api.getReferralAppointments(widget.referralId);
+      final raw = (response['appointments'] as List?) ?? const [];
+      _appointments = raw
+          .whereType<Map>()
+          .map((e) => _Appointment.fromJson(Map<String, dynamic>.from(e)))
+          .toList()
+        ..sort((a, b) => a.scheduledDate.compareTo(b.scheduledDate));
+      _suggestedReferralStatus = response['suggested_status']?.toString() ?? _computeReferralStatusLocal();
+      _computedReferralStatus = response['current_status']?.toString() ?? _computeReferralStatusLocal();
+      final nextRaw = response['next_appointment'];
+      if (nextRaw is Map) {
+        _nextAppointment = _Appointment.fromJson(Map<String, dynamic>.from(nextRaw));
+      } else {
+        _nextAppointment = _appointments.firstWhere(
+          (a) => a.status == 'SCHEDULED',
+          orElse: () => _appointments.isEmpty ? _Appointment.empty() : _appointments.first,
+        );
+      }
+    } catch (_) {
+      _computedReferralStatus = _computeReferralStatusLocal();
+    }
+  }
+
+  String _computeReferralStatusLocal() {
+    if (_appointments.isEmpty) return 'Pending';
+    final completed = _appointments.where((a) => a.status == 'COMPLETED').length;
+    return completed < _appointments.length ? 'Under Treatment' : 'Completed';
+  }
+
+  Future<void> _setReferralStatus(String status) async {
+    try {
+      final api = APIService();
+      final response = await api.updateReferralStatus(referralId: widget.referralId, status: status);
+      _computedReferralStatus = response['current_status']?.toString() ?? status;
+      _suggestedReferralStatus = response['suggested_status']?.toString() ?? _suggestedReferralStatus;
+      if (mounted) setState(() {});
+    } catch (_) {
+      // keep UI usable even if backend is unavailable
+    }
+  }
+
+  Future<void> _createAppointment() async {
+    final types = <String>[
+      'Initial Consultation',
+      'Therapy Session',
+      'Follow-up Review',
+      'Specialist Review',
+    ];
+    var selectedType = types.first;
+    var selectedDate = DateTime.now().add(const Duration(days: 2));
+    final notesController = TextEditingController();
+    final created = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Schedule New Appointment'),
+        content: StatefulBuilder(
+          builder: (context, setInner) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Date'),
+                subtitle: Text(_formatPrettyDate(selectedDate)),
+                trailing: const Icon(Icons.calendar_month_outlined),
+                onTap: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: selectedDate,
+                    firstDate: DateTime.now().subtract(const Duration(days: 1)),
+                    lastDate: DateTime.now().add(const Duration(days: 365)),
+                  );
+                  if (picked != null) {
+                    setInner(() => selectedDate = picked);
+                  }
+                },
+              ),
+              DropdownButtonFormField<String>(
+                initialValue: selectedType,
+                decoration: const InputDecoration(labelText: 'Appointment Type'),
+                items: types.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+                onChanged: (v) {
+                  if (v != null) setInner(() => selectedType = v);
+                },
+              ),
+              TextField(
+                controller: notesController,
+                decoration: const InputDecoration(labelText: 'Notes'),
+                maxLines: 2,
+              ),
+            ],
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (created != true) return;
+    try {
+      final api = APIService();
+      await api.createAppointment(
+        referralId: widget.referralId,
+        childId: widget.childId,
+        scheduledDate: _formatDate(selectedDate),
+        appointmentType: selectedType,
+        notes: notesController.text.trim(),
+      );
+      await _loadAppointments();
+      if (mounted) setState(() {});
+    } catch (_) {
+      // keep UI usable even if backend is unavailable
+    }
+  }
+
+  Future<void> _updateAppointmentStatus(_Appointment appt, String status) async {
+    try {
+      final api = APIService();
+      await api.updateAppointmentStatus(appointmentId: appt.appointmentId, status: status);
+      await _loadAppointments();
+      if (mounted) setState(() {});
+    } catch (_) {
+      // keep UI usable even if backend is unavailable
     }
   }
 
@@ -628,6 +762,11 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
 
   int _daysSinceReferral() => DateTime.now().difference(widget.createdAt).inDays.clamp(0, 9999);
 
+  bool _isReferralDelayed() {
+    final now = DateTime.now();
+    return now.isAfter(widget.expectedFollowUpDate);
+  }
+
   int _stimulationScore(Map<String, String> snapshot) {
     final delays = snapshot.values.where((v) => v != 'Normal').length;
     return (100 - (delays * 15) - (_priorityScore() ~/ 4)).clamp(20, 100);
@@ -703,8 +842,6 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
       case 'under_treatment':
       case 'undertreatment':
         return ReferralStatus.underTreatment;
-      case 'cancelled':
-        return ReferralStatus.cancelled;
       default:
         return ReferralStatus.pending;
     }
@@ -941,6 +1078,76 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
                         .toList(),
                   ),
                 ),
+    );
+  }
+
+  Widget _appointmentsCard() {
+    final hasNext = _nextAppointment != null && _nextAppointment!.appointmentId.isNotEmpty;
+    return _sectionCard(
+      'Appointments',
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              ElevatedButton.icon(
+                onPressed: _createAppointment,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Schedule New Appointment'),
+              ),
+              const SizedBox(width: 12),
+              if (hasNext)
+                Text(
+                  'Next: ${_formatPrettyDate(_nextAppointment!.scheduledDate)} (${_nextAppointment!.appointmentType})',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _appointments.isEmpty
+              ? const Text('No appointments scheduled yet.')
+              : SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: DataTable(
+                    columnSpacing: 18,
+                    columns: const <DataColumn>[
+                      DataColumn(label: Text('Date')),
+                      DataColumn(label: Text('Type')),
+                      DataColumn(label: Text('Status')),
+                      DataColumn(label: Text('Action')),
+                    ],
+                    rows: _appointments
+                        .map(
+                          (appt) => DataRow(
+                            cells: <DataCell>[
+                              DataCell(Text(_formatPrettyDate(appt.scheduledDate))),
+                              DataCell(Text(appt.appointmentType)),
+                              DataCell(Text(appt.status)),
+                              DataCell(
+                                DropdownButton<String>(
+                                  value: appt.status,
+                                  items: const <String>[
+                                    'SCHEDULED',
+                                    'COMPLETED',
+                                    'CANCELLED',
+                                    'RESCHEDULED',
+                                    'MISSED',
+                                  ]
+                                      .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                                      .toList(),
+                                  onChanged: (v) {
+                                    if (v != null) _updateAppointmentStatus(appt, v);
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ),
+        ],
+      ),
     );
   }
 
@@ -1348,6 +1555,7 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
     final expectedWindow = _engineExpectedWindow.isNotEmpty ? _engineExpectedWindow : _expectedImprovementWindow(phaseSeverity);
     final targetMilestone = _engineTargetMilestone.isNotEmpty ? _engineTargetMilestone : _targetMilestone(activeDomains);
     final phaseReviewDays = _engineReviewCycleDays > 0 ? _engineReviewCycleDays : _reviewDaysForSeverity(phaseSeverity);
+    final referralStatus = _appointments.isEmpty ? _referralStatus() : _computedReferralStatus;
     final currentWeek = _phaseCurrentWeek(phaseWeeks);
     _ensureTaskState(awwRows, caregiverRows);
     final awwChecked = _checkedCount(_awwTaskChecks, awwRows);
@@ -1467,24 +1675,72 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
                                           _infoTile(l10n.t('child_id'), widget.childId),
                                           _infoTile(l10n.t('referral_type'), widget.referralType),
                                           _infoTile(l10n.t('urgency'), widget.urgency),
-                                          _infoTile('Referral Status', _referralStatus()),
+                                          _infoTile('Referral Status', referralStatus),
                                           _infoTile(l10n.t('created_on'), _formatDate(widget.createdAt)),
                                           _infoTile(l10n.t('follow_up_by'), _formatDate(widget.expectedFollowUpDate)),
                                           _infoTile('Days Since Referral', '${_daysSinceReferral()}'),
                                         ],
                                       ),
+                                      if (_isReferralDelayed())
+                                        Container(
+                                          margin: const EdgeInsets.only(top: 8),
+                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFFFFF3E0),
+                                            borderRadius: BorderRadius.circular(10),
+                                            border: Border.all(color: const Color(0xFFFFB74D)),
+                                          ),
+                                          child: Row(
+                                            children: <Widget>[
+                                              const Icon(Icons.warning_amber_rounded, color: Color(0xFFF57C00)),
+                                              const SizedBox(width: 8),
+                                              Expanded(
+                                                child: Text(
+                                                  'Referral delayed: follow-up date ${_formatDate(widget.expectedFollowUpDate)} has passed.',
+                                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      const SizedBox(height: 10),
+                                      Wrap(
+                                        spacing: 12,
+                                        runSpacing: 12,
+                                        crossAxisAlignment: WrapCrossAlignment.center,
+                                        children: <Widget>[
+                                          const Text('Update status'),
+                                          DropdownButton<String>(
+                                            value: referralStatus,
+                                            items: const <String>[
+                                              'Pending',
+                                              'Appointment Scheduled',
+                                              'Completed',
+                                              'Under Treatment',
+                                            ].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+                                            onChanged: (v) {
+                                              if (v != null) _setReferralStatus(v);
+                                            },
+                                          ),
+                                          Text(
+                                            'Suggested: $_suggestedReferralStatus',
+                                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                                          ),
+                                        ],
+                                      ),
                                       const SizedBox(height: 10),
                                       SizedBox(
-                                        width: 220,
+                                        width: 240,
                                         child: ElevatedButton.icon(
-                                          onPressed: _showStatusPicker,
-                                          icon: const Icon(Icons.update, size: 18),
-                                          label: const Text('Update Status'),
+                                          onPressed: _createAppointment,
+                                          icon: const Icon(Icons.calendar_month_outlined, size: 18),
+                                          label: const Text('Schedule Appointment'),
                                         ),
                                       ),
                                     ],
                                   ),
                                 ),
+                                _appointmentsCard(),
                                 _sectionCard(
                                   'Child Development Snapshot',
                                   Column(
@@ -2069,4 +2325,47 @@ class _WeekRange {
   final DateTime end;
 
   const _WeekRange(this.weekNumber, this.start, this.end);
+}
+class _Appointment {
+  final String appointmentId;
+  final String referralId;
+  final String childId;
+  final DateTime scheduledDate;
+  final String appointmentType;
+  final String status;
+  final String notes;
+
+  const _Appointment({
+    required this.appointmentId,
+    required this.referralId,
+    required this.childId,
+    required this.scheduledDate,
+    required this.appointmentType,
+    required this.status,
+    required this.notes,
+  });
+
+  factory _Appointment.fromJson(Map<String, dynamic> json) {
+    return _Appointment(
+      appointmentId: json['appointment_id']?.toString() ?? '',
+      referralId: json['referral_id']?.toString() ?? '',
+      childId: json['child_id']?.toString() ?? '',
+      scheduledDate: DateTime.tryParse(json['scheduled_date']?.toString() ?? '') ?? DateTime.now(),
+      appointmentType: json['appointment_type']?.toString() ?? 'Follow-up',
+      status: json['status']?.toString() ?? 'SCHEDULED',
+      notes: json['notes']?.toString() ?? '',
+    );
+  }
+
+  static _Appointment empty() {
+    return _Appointment(
+      appointmentId: '',
+      referralId: '',
+      childId: '',
+      scheduledDate: DateTime.now(),
+      appointmentType: 'Follow-up',
+      status: 'SCHEDULED',
+      notes: '',
+    );
+  }
 }
