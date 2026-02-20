@@ -10,7 +10,6 @@ import 'package:my_first_app/screens/settings_screen.dart';
 import 'package:my_first_app/services/api_service.dart';
 import 'package:my_first_app/services/local_db_service.dart';
 import 'package:my_first_app/widgets/language_menu_button.dart';
-import 'package:my_first_app/core/utils/delay_summary.dart';
 
 class ReferralScreen extends StatefulWidget {
   final String childId;
@@ -104,9 +103,6 @@ class _ReferralScreenState extends State<ReferralScreen> {
   }
 
   void _applyRecommendation() {
-    final overallSeverity = _riskSeverity(widget.overallRisk);
-    final worstDomainSeverity = _domainRisks.isEmpty ? 0 : _domainRisks.first.severity;
-    final combinedSeverity = overallSeverity > worstDomainSeverity ? overallSeverity : worstDomainSeverity;
     final recommendedDomains = _domainRisks.where((d) => d.severity >= 3).toList();
 
     _recommendations.clear();
@@ -196,10 +192,6 @@ class _ReferralScreenState extends State<ReferralScreen> {
         itemBuilder: (context, index) {
           final s = past[index];
           final risk = s.overallRisk.toString().split('.').last;
-          final delaySummary = buildDelaySummaryFromResponses(
-            s.domainResponses,
-            ageMonths: s.ageMonths,
-          );
           return ListTile(
             title: Text('${s.childId} - ${AppLocalizations.of(context).t(risk.toLowerCase()).toUpperCase()}'),
             subtitle: Text(AppLocalizations.of(context).t('date_label', {'date': '${s.screeningDate.toLocal()}'})),
@@ -216,7 +208,6 @@ class _ReferralScreenState extends State<ReferralScreen> {
                     childId: s.childId,
                     awwId: s.awwId,
                     ageMonths: s.ageMonths,
-                    delaySummary: delaySummary,
                   ),
                 ),
               );
@@ -447,12 +438,13 @@ class _ReferralScreenState extends State<ReferralScreen> {
             notes: noteText,
             expectedFollowUpDate: draft.followUpDate,
             createdAt: now,
-            metadata: {
-              'domain': domain?.key,
-              'domain_risk': domain?.risk,
-              'overall_risk': _normalizeRisk(domain?.risk ?? widget.overallRisk),
-              'referral_type_label': draft.referralType,
-              'age_months': widget.ageMonths,
+              metadata: {
+                'sync_status': 'synced',
+                'domain': domain?.key,
+                'domain_risk': domain?.risk,
+                'overall_risk': _normalizeRisk(domain?.risk ?? widget.overallRisk),
+                'referral_type_label': draft.referralType,
+                'age_months': widget.ageMonths,
             },
           ),
         );

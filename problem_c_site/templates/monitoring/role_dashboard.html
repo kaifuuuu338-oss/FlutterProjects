@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ title }} - Problem C</title>
+  <style>
+    body { margin: 0; font-family: "Segoe UI", Arial, sans-serif; background: #f3f6fb; color: #1f2937; }
+    .nav { background: linear-gradient(90deg,#0b63b6,#2087db); color: #fff; padding: 14px 20px; display: flex; gap: 18px; align-items: center; }
+    .brand { font-weight: 700; margin-right: 20px; }
+    .nav a { color: #fff; text-decoration: none; font-weight: 600; }
+    .wrap { max-width: 1200px; margin: 24px auto; padding: 0 16px; }
+    .card { background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-bottom: 16px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap: 12px; }
+    .metric h3 { margin: 0; font-size: 28px; color: #0b63b6; }
+    .metric p { margin: 6px 0 0; color: #4b5563; font-weight: 600; }
+    table { width: 100%; border-collapse: collapse; background: #fff; }
+    th, td { padding: 10px; border-bottom: 1px solid #e5e7eb; text-align: left; }
+    th { background: #eff6ff; color: #1e3a8a; }
+    .pill { padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+    .high { background: #fee2e2; color: #991b1b; }
+    .critical { background: #fecaca; color: #7f1d1d; }
+    .medium { background: #fef3c7; color: #92400e; }
+    .low { background: #dcfce7; color: #166534; }
+    .error { color: #b91c1c; font-weight: 700; }
+    form { display: flex; gap: 10px; align-items: end; }
+    input { padding: 9px 10px; border: 1px solid #d1d5db; border-radius: 8px; min-width: 250px; }
+    button { padding: 9px 14px; border: 0; border-radius: 8px; background: #0b63b6; color: #fff; font-weight: 700; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="nav">
+    <span class="brand">Problem C Portal</span>
+    <a href="/monitoring/aww/">AWW</a>
+    <a href="/monitoring/supervisor/">Supervisor</a>
+    <a href="/monitoring/cdpo/">CDPO</a>
+    <a href="/monitoring/district/">District</a>
+    <a href="/monitoring/state/">State</a>
+  </div>
+
+  <div class="wrap">
+    <div class="card">
+      <h2 style="margin:0 0 10px;">{{ title }}</h2>
+      <p style="margin:0 0 12px; color:#6b7280;">Role: {{ role }}</p>
+      <form method="get">
+        <div>
+          <label>Location ID</label><br>
+          <input type="text" name="location_id" value="{{ location_id }}" placeholder="AWC/sector/mandal/district code">
+        </div>
+        <button type="submit">Apply</button>
+      </form>
+      {% if data.error %}
+        <p class="error">{{ data.error }}</p>
+      {% endif %}
+    </div>
+
+    <div class="grid">
+      <div class="card metric"><h3>{{ data.summary.total_children|default:0 }}</h3><p>Total Children</p></div>
+      <div class="card metric"><h3>{{ data.summary.screened_latest|default:0 }}</h3><p>Screened (Latest)</p></div>
+      <div class="card metric"><h3>{{ data.summary.screening_coverage_pct|default:0 }}%</h3><p>Coverage</p></div>
+      <div class="card metric"><h3>{{ data.summary.pending_referrals|default:0 }}</h3><p>Pending Referrals</p></div>
+      <div class="card metric"><h3>{{ data.summary.followup_due|default:0 }}</h3><p>Follow-up Due</p></div>
+      <div class="card metric"><h3>{{ data.summary.followup_compliance_pct|default:0 }}%</h3><p>Follow-up Compliance</p></div>
+    </div>
+
+    <div class="card">
+      <h3>Risk Distribution</h3>
+      <table>
+        <thead><tr><th>Low</th><th>Medium</th><th>High</th><th>Critical</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>{{ data.risk_distribution.Low|default:0 }}</td>
+            <td>{{ data.risk_distribution.Medium|default:0 }}</td>
+            <td>{{ data.risk_distribution.High|default:0 }}</td>
+            <td>{{ data.risk_distribution.Critical|default:0 }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>Top Priority Children</h3>
+      <table>
+        <thead><tr><th>Child ID</th><th>Risk</th><th>Age Months</th><th>Mandal</th></tr></thead>
+        <tbody>
+        {% for c in data.priority_children %}
+          <tr>
+            <td>{{ c.child_id }}</td>
+            <td><span class="pill {{ c.risk_category|lower }}">{{ c.risk_category }}</span></td>
+            <td>{{ c.age_months }}</td>
+            <td>{{ c.mandal|default:"-" }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="4">No priority children.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>High Risk Alert Panel</h3>
+      <table>
+        <thead><tr><th>Child ID</th><th>Risk</th><th>Domain</th><th>Referral Status</th><th>Days Since Flagged</th></tr></thead>
+        <tbody>
+        {% for c in data.high_risk_children %}
+          <tr>
+            <td>{{ c.child_id }}</td>
+            <td><span class="pill {{ c.risk_category|lower }}">{{ c.risk_category }}</span></td>
+            <td>{{ c.domain_affected }}</td>
+            <td>{{ c.referral_status }}</td>
+            <td>{{ c.days_since_flagged }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="5">No high-risk children.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</body>
+</html>

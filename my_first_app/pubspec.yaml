@@ -27,7 +27,6 @@ dependencies:
 
   # Local Storage
   hive: ^2.2.3
-  hive_flutter: ^1.1.0
   sqflite: ^2.2.8+4
   path: ^1.8.3
 
@@ -42,6 +41,7 @@ dependencies:
 
   # Connectivity
   connectivity_plus: ^5.0.2
+  excel: ^4.0.6
 
   # Animations
   loading_animation_widget: ^1.2.0
@@ -66,3 +66,7 @@ flutter:
     - assets/localization/hi.json
     - assets/milestones/problem_a_milestones.json
     - assets/images/
+    - backend/data/boys_wfa.csv
+    - backend/data/girls_wfa.csv
+    - backend/data/boys_hfa.csv
+    - backend/data/girls_hfa.csv

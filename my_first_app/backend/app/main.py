@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import os
+import json
 import uuid
 import sqlite3
+import tempfile
 from collections import Counter
 from datetime import datetime, date
 from typing import Dict, List, Optional
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -70,6 +74,24 @@ class LoginRequest(BaseModel):
 class LoginResponse(BaseModel):
     token: str
     user_id: str
+
+
+class ChildRegisterRequest(BaseModel):
+    child_id: str
+    child_name: Optional[str] = None
+    gender: Optional[str] = None
+    age_months: int = 0
+    awc_id: Optional[str] = None
+    sector_id: Optional[str] = None
+    mandal_id: Optional[str] = None
+    district_id: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class ChildRegisterResponse(BaseModel):
+    child_id: str
+    status: str
+    created_at: str
 
 
 class ScreeningRequest(BaseModel):
@@ -171,6 +193,41 @@ def _init_db(db_path: str) -> None:
               followup_completed INTEGER,
               followup_date TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS app_state (
+              state_key TEXT PRIMARY KEY,
+              payload_json TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS intervention_history (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              child_id TEXT NOT NULL,
+              source TEXT NOT NULL,
+              request_json TEXT NOT NULL,
+              response_json TEXT NOT NULL,
+              created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS followup_assessment (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              child_id TEXT NOT NULL,
+              baseline_delay INTEGER NOT NULL,
+              followup_delay INTEGER NOT NULL,
+              delay_reduction INTEGER NOT NULL,
+              trend TEXT NOT NULL,
+              created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS caregiver_engagement_log (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              child_id TEXT NOT NULL,
+              mode TEXT NOT NULL,
+              contact_json TEXT,
+              status TEXT NOT NULL,
+              note TEXT NOT NULL,
+              created_at TEXT NOT NULL
+            );
             """
         )
 
@@ -224,6 +281,215 @@ def _parse_date_safe(value: str | None) -> date | None:
         except ValueError:
             return None
 
+
+def _pg_connect(pg_dsn: str):
+    return psycopg2.connect(pg_dsn, cursor_factory=RealDictCursor)
+
+
+def _init_pg_db(pg_dsn: str) -> None:
+    with _pg_connect(pg_dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS child_profile (
+                  child_id TEXT PRIMARY KEY,
+                  gender TEXT,
+                  age_months INTEGER,
+                  awc_id TEXT,
+                  sector_id TEXT,
+                  mandal_id TEXT,
+                  district_id TEXT,
+                  created_at TEXT
+                );
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS screening_event (
+                  id SERIAL PRIMARY KEY,
+                  child_id TEXT,
+                  age_months INTEGER,
+                  overall_risk TEXT,
+                  explainability TEXT,
+                  assessment_cycle TEXT,
+                  created_at TEXT
+                );
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS screening_domain_score (
+                  id SERIAL PRIMARY KEY,
+                  screening_id INTEGER,
+                  domain TEXT,
+                  risk_label TEXT,
+                  score DOUBLE PRECISION
+                );
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS referral_action (
+                  referral_id TEXT PRIMARY KEY,
+                  child_id TEXT,
+                  aww_id TEXT,
+                  referral_required INTEGER,
+                  referral_type TEXT,
+                  urgency TEXT,
+                  referral_status TEXT,
+                  referral_date TEXT,
+                  completion_date TEXT
+                );
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS followup_outcome (
+                  id SERIAL PRIMARY KEY,
+                  child_id TEXT,
+                  baseline_delay_months INTEGER,
+                  followup_delay_months INTEGER,
+                  improvement_status TEXT,
+                  followup_completed INTEGER,
+                  followup_date TEXT
+                );
+                """
+            )
+        conn.commit()
+
+
+def _upsert_child_profile_pg(pg_dsn: str, payload: ChildRegisterRequest) -> ChildRegisterResponse:
+    created_at = payload.created_at or datetime.utcnow().isoformat()
+    with _pg_connect(pg_dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO child_profile(child_id, gender, age_months, awc_id, sector_id, mandal_id, district_id, created_at)
+                VALUES(%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT(child_id) DO UPDATE SET
+                  gender=COALESCE(NULLIF(EXCLUDED.gender, ''), child_profile.gender),
+                  age_months=EXCLUDED.age_months,
+                  awc_id=COALESCE(NULLIF(EXCLUDED.awc_id, ''), child_profile.awc_id),
+                  sector_id=COALESCE(NULLIF(EXCLUDED.sector_id, ''), child_profile.sector_id),
+                  mandal_id=COALESCE(NULLIF(EXCLUDED.mandal_id, ''), child_profile.mandal_id),
+                  district_id=COALESCE(NULLIF(EXCLUDED.district_id, ''), child_profile.district_id)
+                """,
+                (
+                    payload.child_id,
+                    payload.gender or "",
+                    int(payload.age_months or 0),
+                    payload.awc_id or "",
+                    payload.sector_id or "",
+                    payload.mandal_id or "",
+                    payload.district_id or "",
+                    created_at,
+                ),
+            )
+        conn.commit()
+    return ChildRegisterResponse(child_id=payload.child_id, status="synced", created_at=created_at)
+
+
+def _save_screening_pg(pg_dsn: str, payload: ScreeningRequest, result: ScreeningResponse) -> None:
+    created_at = datetime.utcnow().isoformat()
+    with _pg_connect(pg_dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO child_profile(child_id, gender, age_months, awc_id, sector_id, mandal_id, district_id, created_at)
+                VALUES(%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT(child_id) DO UPDATE SET
+                  gender=COALESCE(NULLIF(EXCLUDED.gender, ''), child_profile.gender),
+                  age_months=EXCLUDED.age_months,
+                  awc_id=COALESCE(NULLIF(EXCLUDED.awc_id, ''), child_profile.awc_id),
+                  sector_id=COALESCE(NULLIF(EXCLUDED.sector_id, ''), child_profile.sector_id),
+                  mandal_id=COALESCE(NULLIF(EXCLUDED.mandal_id, ''), child_profile.mandal_id),
+                  district_id=COALESCE(NULLIF(EXCLUDED.district_id, ''), child_profile.district_id)
+                """,
+                (
+                    payload.child_id,
+                    payload.gender or "",
+                    payload.age_months,
+                    payload.awc_id or "",
+                    payload.sector_id or "",
+                    payload.mandal or "",
+                    payload.district or "",
+                    created_at,
+                ),
+            )
+            cur.execute(
+                """
+                INSERT INTO screening_event(child_id, age_months, overall_risk, explainability, assessment_cycle, created_at)
+                VALUES(%s,%s,%s,%s,%s,%s)
+                RETURNING id
+                """,
+                (
+                    payload.child_id,
+                    payload.age_months,
+                    _normalize_risk(result.risk_level),
+                    "; ".join(result.explanation),
+                    payload.assessment_cycle or "Baseline",
+                    created_at,
+                ),
+            )
+            screening_id = int(cur.fetchone()["id"])
+            for domain, risk in result.domain_scores.items():
+                cur.execute(
+                    """
+                    INSERT INTO screening_domain_score(screening_id, domain, risk_label, score)
+                    VALUES(%s,%s,%s,%s)
+                    """,
+                    (screening_id, domain, _normalize_risk(risk), _risk_score(risk)),
+                )
+            delay_months = int((result.delay_summary or {}).get("num_delays", 0)) * 2
+            cur.execute(
+                """
+                SELECT id FROM followup_outcome
+                WHERE child_id=%s
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (payload.child_id,),
+            )
+            existing = cur.fetchone()
+            if existing is None:
+                cur.execute(
+                    """
+                    INSERT INTO followup_outcome(child_id, baseline_delay_months, followup_delay_months, improvement_status, followup_completed, followup_date)
+                    VALUES(%s,%s,%s,%s,%s,%s)
+                    """,
+                    (
+                        payload.child_id,
+                        delay_months,
+                        delay_months,
+                        "No Change",
+                        0,
+                        datetime.utcnow().date().isoformat(),
+                    ),
+                )
+        conn.commit()
+
+
+def _create_referral_pg(pg_dsn: str, payload: ReferralRequest, referral_id: str) -> None:
+    with _pg_connect(pg_dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO referral_action(referral_id, child_id, aww_id, referral_required, referral_type, urgency, referral_status, referral_date, completion_date)
+                VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                (
+                    referral_id,
+                    payload.child_id,
+                    payload.aww_id,
+                    1,
+                    payload.referral_type,
+                    payload.urgency,
+                    "Pending",
+                    datetime.utcnow().date().isoformat(),
+                    None,
+                ),
+            )
+        conn.commit()
 
 def _save_screening(db_path: str, payload: ScreeningRequest, result: ScreeningResponse) -> None:
     created_at = datetime.utcnow().isoformat()
@@ -303,13 +569,85 @@ def _save_screening(db_path: str, payload: ScreeningRequest, result: ScreeningRe
             )
 
 
+def _upsert_child_profile(db_path: str, payload: ChildRegisterRequest) -> ChildRegisterResponse:
+    created_at = payload.created_at or datetime.utcnow().isoformat()
+    with _get_conn(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO child_profile(child_id, gender, age_months, awc_id, sector_id, mandal_id, district_id, created_at)
+            VALUES(?,?,?,?,?,?,?,?)
+            ON CONFLICT(child_id) DO UPDATE SET
+              gender=COALESCE(NULLIF(excluded.gender, ''), child_profile.gender),
+              age_months=excluded.age_months,
+              awc_id=COALESCE(NULLIF(excluded.awc_id, ''), child_profile.awc_id),
+              sector_id=COALESCE(NULLIF(excluded.sector_id, ''), child_profile.sector_id),
+              mandal_id=COALESCE(NULLIF(excluded.mandal_id, ''), child_profile.mandal_id),
+              district_id=COALESCE(NULLIF(excluded.district_id, ''), child_profile.district_id)
+            """,
+            (
+                payload.child_id,
+                payload.gender or "",
+                int(payload.age_months or 0),
+                payload.awc_id or "",
+                payload.sector_id or "",
+                payload.mandal_id or "",
+                payload.district_id or "",
+                created_at,
+            ),
+        )
+    return ChildRegisterResponse(
+        child_id=payload.child_id,
+        status="synced",
+        created_at=created_at,
+    )
+
+
+def _state_key(kind: str, entity_id: str) -> str:
+    return f"{kind}:{entity_id}"
+
+
+def _save_state(db_path: str, kind: str, entity_id: str, payload: dict | list) -> None:
+    key = _state_key(kind, entity_id)
+    with _get_conn(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO app_state(state_key, payload_json, updated_at)
+            VALUES(?,?,?)
+            ON CONFLICT(state_key) DO UPDATE SET
+              payload_json=excluded.payload_json,
+              updated_at=excluded.updated_at
+            """,
+            (key, json.dumps(payload), datetime.utcnow().isoformat()),
+        )
+
+
+def _load_state(db_path: str, kind: str, entity_id: str, default):
+    key = _state_key(kind, entity_id)
+    with _get_conn(db_path) as conn:
+        row = conn.execute(
+            "SELECT payload_json FROM app_state WHERE state_key=?",
+            (key,),
+        ).fetchone()
+    if row is None:
+        return default
+    try:
+        return json.loads(row["payload_json"])
+    except Exception:
+        return default
+
+
 def _compute_monitoring(db_path: str, role: str, location_id: str) -> dict:
     role_to_column = {"aww": "awc_id", "supervisor": "sector_id", "cdpo": "mandal_id", "district": "district_id", "state": ""}
     filter_column = role_to_column.get(role, "")
     with _get_conn(db_path) as conn:
         children = conn.execute("SELECT * FROM child_profile").fetchall()
         if filter_column and location_id:
-            children = [c for c in children if (c[filter_column] or "") == location_id]
+            q = str(location_id).strip().upper()
+            children = [
+                c
+                for c in children
+                if str(c[filter_column] or "").strip().upper() == q
+            ]
         child_ids = [c["child_id"] for c in children]
         child_map = {c["child_id"]: dict(c) for c in children}
 
@@ -676,6 +1014,136 @@ def _compute_impact(db_path: str, role: str, location_id: str) -> dict:
     }
 
 
+def _refresh_pg_mirror_sqlite(pg_dsn: str) -> str:
+    """
+    Build a temporary SQLite mirror from PostgreSQL for analytics functions.
+    This keeps existing monitoring/impact logic unchanged while PostgreSQL is source-of-truth.
+    """
+    mirror_path = os.path.join(tempfile.gettempdir(), "ecd_pg_mirror.db")
+    _init_db(mirror_path)
+
+    with _get_conn(mirror_path) as sqlite_conn:
+        sqlite_conn.execute("DELETE FROM screening_domain_score")
+        sqlite_conn.execute("DELETE FROM screening_event")
+        sqlite_conn.execute("DELETE FROM referral_action")
+        sqlite_conn.execute("DELETE FROM followup_outcome")
+        sqlite_conn.execute("DELETE FROM child_profile")
+
+        with _pg_connect(pg_dsn) as pg_conn:
+            with pg_conn.cursor() as cur:
+                cur.execute("SELECT child_id, gender, age_months, awc_id, sector_id, mandal_id, district_id, created_at FROM child_profile")
+                for r in cur.fetchall():
+                    sqlite_conn.execute(
+                        """
+                        INSERT INTO child_profile(child_id, gender, age_months, awc_id, sector_id, mandal_id, district_id, created_at)
+                        VALUES(?,?,?,?,?,?,?,?)
+                        """,
+                        (
+                            r.get("child_id"),
+                            r.get("gender"),
+                            int(r.get("age_months") or 0),
+                            r.get("awc_id") or "",
+                            r.get("sector_id") or "",
+                            r.get("mandal_id") or "",
+                            r.get("district_id") or "",
+                            r.get("created_at") or "",
+                        ),
+                    )
+
+                cur.execute("SELECT id, child_id, age_months, overall_risk, explainability, assessment_cycle, created_at FROM screening_event")
+                for r in cur.fetchall():
+                    sqlite_conn.execute(
+                        """
+                        INSERT INTO screening_event(id, child_id, age_months, overall_risk, explainability, assessment_cycle, created_at)
+                        VALUES(?,?,?,?,?,?,?)
+                        """,
+                        (
+                            int(r.get("id") or 0),
+                            r.get("child_id"),
+                            int(r.get("age_months") or 0),
+                            r.get("overall_risk") or "",
+                            r.get("explainability") or "",
+                            r.get("assessment_cycle") or "Baseline",
+                            r.get("created_at") or "",
+                        ),
+                    )
+
+                cur.execute("SELECT id, screening_id, domain, risk_label, score FROM screening_domain_score")
+                for r in cur.fetchall():
+                    sqlite_conn.execute(
+                        """
+                        INSERT INTO screening_domain_score(id, screening_id, domain, risk_label, score)
+                        VALUES(?,?,?,?,?)
+                        """,
+                        (
+                            int(r.get("id") or 0),
+                            int(r.get("screening_id") or 0),
+                            r.get("domain") or "",
+                            r.get("risk_label") or "",
+                            float(r.get("score") or 0.0),
+                        ),
+                    )
+
+                cur.execute(
+                    """
+                    SELECT referral_id, child_id, aww_id, referral_required, referral_type, urgency, referral_status, referral_date, completion_date
+                    FROM referral_action
+                    """
+                )
+                for r in cur.fetchall():
+                    sqlite_conn.execute(
+                        """
+                        INSERT INTO referral_action(referral_id, child_id, aww_id, referral_required, referral_type, urgency, referral_status, referral_date, completion_date)
+                        VALUES(?,?,?,?,?,?,?,?,?)
+                        """,
+                        (
+                            r.get("referral_id"),
+                            r.get("child_id"),
+                            r.get("aww_id"),
+                            int(r.get("referral_required") or 0),
+                            r.get("referral_type") or "",
+                            r.get("urgency") or "",
+                            r.get("referral_status") or "",
+                            r.get("referral_date") or "",
+                            r.get("completion_date"),
+                        ),
+                    )
+
+                cur.execute(
+                    """
+                    SELECT id, child_id, baseline_delay_months, followup_delay_months, improvement_status, followup_completed, followup_date
+                    FROM followup_outcome
+                    """
+                )
+                for r in cur.fetchall():
+                    sqlite_conn.execute(
+                        """
+                        INSERT INTO followup_outcome(id, child_id, baseline_delay_months, followup_delay_months, improvement_status, followup_completed, followup_date)
+                        VALUES(?,?,?,?,?,?,?)
+                        """,
+                        (
+                            int(r.get("id") or 0),
+                            r.get("child_id"),
+                            int(r.get("baseline_delay_months") or 0),
+                            int(r.get("followup_delay_months") or 0),
+                            r.get("improvement_status") or "No Change",
+                            int(r.get("followup_completed") or 0),
+                            r.get("followup_date") or "",
+                        ),
+                    )
+    return mirror_path
+
+
+def _compute_monitoring_postgres(pg_dsn: str, role: str, location_id: str) -> dict:
+    mirror_path = _refresh_pg_mirror_sqlite(pg_dsn)
+    return _compute_monitoring(mirror_path, role, location_id)
+
+
+def _compute_impact_postgres(pg_dsn: str, role: str, location_id: str) -> dict:
+    mirror_path = _refresh_pg_mirror_sqlite(pg_dsn)
+    return _compute_impact(mirror_path, role, location_id)
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="ECD AI Backend", version="1.0.0")
 
@@ -709,16 +1177,13 @@ def create_app() -> FastAPI:
         "ECD_DATA_DB",
         os.path.abspath(os.path.join(os.path.dirname(__file__), "ecd_data.db")),
     )
+    postgres_dsn = os.getenv("ECD_POSTGRES_DSN", "").strip()
     _init_db(db_path)
-    # Simple in-memory store for tasks/checklists (child_id -> data)
-    tasks_store: Dict[str, Dict] = {}
-    # In-memory activity assignment + tracking store for Problem B engine
-    activity_tracking_store: Dict[str, List[Dict]] = {}
-    activity_plan_summary_store: Dict[str, Dict] = {}
-
+    if postgres_dsn:
+        _init_pg_db(postgres_dsn)
     def _phase_payload(child_id: str) -> Dict:
-        rows = activity_tracking_store.get(child_id, [])
-        summary = activity_plan_summary_store.get(child_id, {
+        rows = _load_state(db_path, "pb_activity_rows", child_id, [])
+        summary = _load_state(db_path, "pb_activity_summary", child_id, {
             "child_id": child_id,
             "domains": [],
             "total_activities": 0,
@@ -757,6 +1222,15 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="Password is required")
         token = f"demo_jwt_{uuid.uuid4().hex}"
         return LoginResponse(token=token, user_id=f"aww_{payload.mobile_number}")
+
+    @app.post("/children/register", response_model=ChildRegisterResponse)
+    def register_child(payload: ChildRegisterRequest) -> ChildRegisterResponse:
+        if not payload.child_id.strip():
+            raise HTTPException(status_code=400, detail="child_id is required")
+        response = _upsert_child_profile(db_path, payload)
+        if postgres_dsn:
+            _upsert_child_profile_pg(postgres_dsn, payload)
+        return response
 
     @app.post("/screening/submit", response_model=ScreeningResponse)
     def submit_screening(payload: ScreeningRequest) -> ScreeningResponse:
@@ -799,9 +1273,11 @@ def create_app() -> FastAPI:
                 "delay_summary": delay_summary,
             }
         else:
-            result = predict_risk(payload.model_dump(), artifacts)
+            result = predict_risk(payload.dict(), artifacts)
         response = ScreeningResponse(**result)
         _save_screening(db_path, payload, response)
+        if postgres_dsn:
+            _save_screening_pg(postgres_dsn, payload, response)
         return response
 
     @app.post("/referral/create", response_model=ReferralResponse)
@@ -832,14 +1308,20 @@ def create_app() -> FastAPI:
                     None,
                 ),
             )
+        if postgres_dsn:
+            _create_referral_pg(postgres_dsn, payload, referral_id)
         return response
 
     @app.get("/analytics/monitoring")
     def analytics_monitoring(role: str = "state", location_id: str = "") -> dict:
+        if postgres_dsn:
+            return _compute_monitoring_postgres(postgres_dsn, role=role, location_id=location_id)
         return _compute_monitoring(db_path, role=role, location_id=location_id)
 
     @app.get("/analytics/impact")
     def analytics_impact(role: str = "state", location_id: str = "") -> dict:
+        if postgres_dsn:
+            return _compute_impact_postgres(postgres_dsn, role=role, location_id=location_id)
         return _compute_impact(db_path, role=role, location_id=location_id)
 
     @app.post("/intervention/plan")
@@ -867,6 +1349,22 @@ def create_app() -> FastAPI:
                     normalized[k] = "Normal"
             data["domain_scores"] = normalized
         result = generate_intervention(data)
+        child_id = str(data.get("child_id") or "")
+        if child_id:
+            with _get_conn(db_path) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO intervention_history(child_id, source, request_json, response_json, created_at)
+                    VALUES(?,?,?,?,?)
+                    """,
+                    (
+                        child_id,
+                        "intervention/plan",
+                        json.dumps(data),
+                        json.dumps(result),
+                        datetime.utcnow().isoformat(),
+                    ),
+                )
         return result
 
     class FollowupRequest(BaseModel):
@@ -876,7 +1374,56 @@ def create_app() -> FastAPI:
 
     @app.post("/followup/assess")
     def followup_assess(payload: FollowupRequest):
-        return calculate_trend(payload.baseline_delay, payload.followup_delay)
+        reduction, trend = calculate_trend(payload.baseline_delay, payload.followup_delay)
+        now_iso = datetime.utcnow().isoformat()
+        with _get_conn(db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO followup_assessment(child_id, baseline_delay, followup_delay, delay_reduction, trend, created_at)
+                VALUES(?,?,?,?,?,?)
+                """,
+                (
+                    payload.child_id,
+                    int(payload.baseline_delay),
+                    int(payload.followup_delay),
+                    int(reduction),
+                    trend,
+                    now_iso,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO followup_outcome(child_id, baseline_delay_months, followup_delay_months, improvement_status, followup_completed, followup_date)
+                VALUES(?,?,?,?,?,?)
+                """,
+                (
+                    payload.child_id,
+                    int(payload.baseline_delay),
+                    int(payload.followup_delay),
+                    "Improving" if trend == "Improved" else ("Worsening" if trend == "Worsened" else "No Change"),
+                    1,
+                    datetime.utcnow().date().isoformat(),
+                ),
+            )
+        if postgres_dsn:
+            with _pg_connect(postgres_dsn) as pg_conn:
+                with pg_conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO followup_outcome(child_id, baseline_delay_months, followup_delay_months, improvement_status, followup_completed, followup_date)
+                        VALUES(%s,%s,%s,%s,%s,%s)
+                        """,
+                        (
+                            payload.child_id,
+                            int(payload.baseline_delay),
+                            int(payload.followup_delay),
+                            "Improving" if trend == "Improved" else ("Worsening" if trend == "Worsened" else "No Change"),
+                            1,
+                            datetime.utcnow().date().isoformat(),
+                        ),
+                    )
+                pg_conn.commit()
+        return {"delay_reduction": reduction, "trend": trend}
 
     class ProblemBPlanRequest(BaseModel):
         child_id: str
@@ -889,7 +1436,23 @@ def create_app() -> FastAPI:
 
     @app.post("/problem-b/intervention-plan")
     def problem_b_intervention_plan(payload: ProblemBPlanRequest):
-        return generate_intervention_plan(payload.model_dump())
+        req = payload.dict()
+        result = generate_intervention_plan(req)
+        with _get_conn(db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO intervention_history(child_id, source, request_json, response_json, created_at)
+                VALUES(?,?,?,?,?)
+                """,
+                (
+                    payload.child_id,
+                    "problem-b/intervention-plan",
+                    json.dumps(req),
+                    json.dumps(result),
+                    datetime.utcnow().isoformat(),
+                ),
+            )
+        return result
 
     class ProblemBTrendRequest(BaseModel):
         baseline_delay: int
@@ -963,8 +1526,8 @@ def create_app() -> FastAPI:
             delayed_domains=delayed,
             severity_level=severity,
         )
-        activity_tracking_store[payload.child_id] = assigned
-        activity_plan_summary_store[payload.child_id] = summary
+        _save_state(db_path, "pb_activity_rows", payload.child_id, assigned)
+        _save_state(db_path, "pb_activity_summary", payload.child_id, summary)
         return _phase_payload(payload.child_id)
 
     @app.get("/problem-b/activities/{child_id}")
@@ -978,7 +1541,7 @@ def create_app() -> FastAPI:
 
     @app.post("/problem-b/activities/mark-status")
     def update_activity_status(payload: ActivityStatusUpdateRequest):
-        rows = activity_tracking_store.get(payload.child_id, [])
+        rows = _load_state(db_path, "pb_activity_rows", payload.child_id, [])
         status = payload.status.strip().lower()
         if status not in {"pending", "completed", "skipped"}:
             raise HTTPException(status_code=400, detail="Invalid status")
@@ -994,6 +1557,7 @@ def create_app() -> FastAPI:
                 break
         if not updated:
             raise HTTPException(status_code=404, detail="Activity not found")
+        _save_state(db_path, "pb_activity_rows", payload.child_id, rows)
         return {
             "status": "ok",
             "child_id": payload.child_id,
@@ -1004,9 +1568,9 @@ def create_app() -> FastAPI:
 
     @app.get("/problem-b/compliance/{child_id}")
     def get_problem_b_compliance(child_id: str):
-        rows = activity_tracking_store.get(child_id, [])
+        rows = _load_state(db_path, "pb_activity_rows", child_id, [])
         compliance = compute_compliance(rows)
-        summary = activity_plan_summary_store.get(child_id, {})
+        summary = _load_state(db_path, "pb_activity_summary", child_id, {})
         phase_weeks = int(summary.get("phase_duration_weeks", 1) or 1)
         weekly_rows = weekly_progress_rows(rows, phase_weeks)
         return {
@@ -1025,8 +1589,9 @@ def create_app() -> FastAPI:
         freq = payload.frequency_type.strip().lower()
         if freq not in {"daily", "weekly"}:
             raise HTTPException(status_code=400, detail="frequency_type must be daily or weekly")
-        rows = activity_tracking_store.get(payload.child_id, [])
+        rows = _load_state(db_path, "pb_activity_rows", payload.child_id, [])
         updated_count = reset_frequency_status(rows, freq)
+        _save_state(db_path, "pb_activity_rows", payload.child_id, rows)
         phase = _phase_payload(payload.child_id)
         return {
             "status": "ok",
@@ -1044,9 +1609,27 @@ def create_app() -> FastAPI:
     @app.post("/caregiver/engage")
     def caregiver_engage(payload: CaregiverEngagementRequest):
         mode = payload.mode.lower()
+        status = "ok"
+        note = "Printed material to be provided"
         if "phone" in mode and payload.contact:
-            return {"status": "queued", "mode": payload.mode, "note": "IVR/WhatsApp message scheduled"}
-        return {"status": "ok", "mode": payload.mode, "note": "Printed material to be provided"}
+            status = "queued"
+            note = "IVR/WhatsApp message scheduled"
+        with _get_conn(db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO caregiver_engagement_log(child_id, mode, contact_json, status, note, created_at)
+                VALUES(?,?,?,?,?,?)
+                """,
+                (
+                    payload.child_id,
+                    payload.mode,
+                    json.dumps(payload.contact or {}),
+                    status,
+                    note,
+                    datetime.utcnow().isoformat(),
+                ),
+            )
+        return {"status": status, "mode": payload.mode, "note": note}
 
     class TasksSaveRequest(BaseModel):
         child_id: str
@@ -1058,14 +1641,14 @@ def create_app() -> FastAPI:
 
     @app.post("/tasks/save")
     def save_tasks(payload: TasksSaveRequest):
-        data = payload.model_dump()
+        data = payload.dict()
         child = data.pop("child_id")
-        tasks_store[child] = data
+        _save_state(db_path, "tasks", child, data)
         return {"status": "saved", "child_id": child}
 
     @app.get("/tasks/{child_id}")
     def get_tasks(child_id: str):
-        return tasks_store.get(child_id, {
+        return _load_state(db_path, "tasks", child_id, {
             "aww_checks": {},
             "parent_checks": {},
             "caregiver_checks": {},

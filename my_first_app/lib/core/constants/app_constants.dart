@@ -14,6 +14,7 @@ class AppConstants {
   static const String otpResendEndpoint = '/auth/otp/resend';
   static const String sessionExchangeEndpoint = '/auth/session';
   static const String screeningEndpoint = '/screening/submit';
+  static const String childRegisterEndpoint = '/children/register';
   static const String childListEndpoint = '/children';
   static const String childDetailEndpoint = '/children';
   static const String referralEndpoint = '/referral/create';
@@ -30,6 +31,7 @@ class AppConstants {
   static const String childBoxName = 'child_box';
   static const String screeningBoxName = 'screening_box';
   static const String referralBoxName = 'referral_box';
+  static const String childSyncBoxName = 'child_sync_box';
   
   // Domain Constants
   static const List<String> domains = ['GM', 'FM', 'LC', 'COG', 'SE'];

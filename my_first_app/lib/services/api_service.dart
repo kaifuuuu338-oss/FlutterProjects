@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:my_first_app/core/constants/app_constants.dart';
+import 'package:my_first_app/models/child_model.dart';
 import 'auth_service.dart';
 
 class APIService {
@@ -94,6 +95,29 @@ class APIService {
       return response.data as Map<String, dynamic>;
     } on DioException catch (e) {
       throw Exception('Screening submission failed: ${e.message}');
+    }
+  }
+
+  /// Register/upsert child profile in backend source DB.
+  Future<Map<String, dynamic>> registerChild(ChildModel child) async {
+    try {
+      final response = await _dio.post(
+        AppConstants.childRegisterEndpoint,
+        data: {
+          'child_id': child.childId,
+          'child_name': child.childName,
+          'gender': child.gender,
+          'age_months': child.ageMonths,
+          'awc_id': child.awcCode,
+          'sector_id': '',
+          'mandal_id': child.mandal,
+          'district_id': child.district,
+          'created_at': child.createdAt.toIso8601String(),
+        },
+      );
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw Exception('Child registration sync failed: ${e.message}');
     }
   }
 

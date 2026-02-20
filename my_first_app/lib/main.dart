@@ -6,12 +6,14 @@ import 'package:my_first_app/core/localization/app_localizations.dart';
 import 'package:my_first_app/core/localization/locale_provider.dart';
 import 'package:my_first_app/core/navigation/app_route_observer.dart';
 import 'package:my_first_app/core/theme/app_theme.dart';
+import 'package:my_first_app/core/utils/problem_a_lms_service.dart';
 import 'package:my_first_app/services/local_db_service.dart';
 import 'package:my_first_app/services/sync_service.dart';
 import 'package:my_first_app/screens/splash_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await ProblemALmsService.instance.initialize();
 
   // Initialize local database (Hive) - skip on web
   if (!kIsWeb) {
@@ -21,6 +23,7 @@ Future<void> main() async {
     // Start connectivity listener to auto-sync pending screenings
     final sync = SyncService(localDb);
     sync.listenForConnectivityChanges();
+    await sync.syncPendingData();
   }
 
   final localeProvider = LocaleProvider();

@@ -8,6 +8,7 @@ import 'package:my_first_app/screens/dashboard_screen.dart';
 import 'package:my_first_app/screens/result_screen.dart';
 import 'package:my_first_app/screens/settings_screen.dart';
 import 'package:my_first_app/services/local_db_service.dart';
+import 'package:my_first_app/services/sync_service.dart';
 import 'package:my_first_app/widgets/language_menu_button.dart';
 
 class ChildRegistrationScreen extends StatefulWidget {
@@ -118,6 +119,7 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
 
     await _localDb.initialize();
     await _localDb.saveChild(child);
+    await SyncService(_localDb).syncPendingData();
     if (!mounted) return;
 
     Navigator.of(context).pushReplacement(

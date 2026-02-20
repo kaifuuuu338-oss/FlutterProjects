@@ -1,5 +1,6 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:my_first_app/models/aww_model.dart';
+import 'package:my_first_app/services/local_db_service.dart';
 
 class AuthService {
   static const _storage = FlutterSecureStorage();
@@ -19,6 +20,22 @@ class AuthService {
 
         await _storage.write(key: _tokenKey, value: mockToken);
         await _storage.write(key: _refreshTokenKey, value: mockRefreshToken);
+        final now = DateTime.now();
+        final localDb = LocalDBService();
+        await localDb.initialize();
+        await localDb.saveAWW(
+          AWWModel(
+            awwId: 'aww_$phone',
+            name: phone,
+            mobileNumber: phone,
+            awcCode: 'AWS_DEMO_001',
+            mandal: '',
+            district: '',
+            password: password,
+            createdAt: now,
+            updatedAt: now,
+          ),
+        );
 
         return true;
       }
@@ -40,6 +57,9 @@ class AuthService {
         await _storage.write(key: _tokenKey, value: mockToken);
         await _storage.write(key: _refreshTokenKey, value: mockRefreshToken);
         await _storage.write(key: _userDataKey, value: aww.toString());
+        final localDb = LocalDBService();
+        await localDb.initialize();
+        await localDb.saveAWW(aww);
 
         return true;
       }

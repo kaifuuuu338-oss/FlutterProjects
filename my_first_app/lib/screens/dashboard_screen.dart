@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:hive_flutter/hive_flutter.dart';
-import 'package:my_first_app/core/constants/app_constants.dart';
 import 'package:my_first_app/core/localization/app_localizations.dart';
 import 'package:my_first_app/core/navigation/app_route_observer.dart';
 import 'package:my_first_app/models/child_model.dart';
@@ -191,28 +189,12 @@ class _DashboardScreenState extends State<DashboardScreen> with RouteAware {
   }
 
   Widget _childrenCountCard(double s) {
-    if (!Hive.isBoxOpen(AppConstants.childBoxName)) {
-      return _statCard(
-        label: AppLocalizations.of(context).t('registered_children'),
-        value: '$totalChildren',
-        icon: Icons.groups,
-        accent: const Color(0xFF2E7D32),
-        s: s,
-      );
-    }
-    final box = Hive.box<Map>(AppConstants.childBoxName);
-    return ValueListenableBuilder<Box<Map>>(
-      valueListenable: box.listenable(),
-      builder: (context, value, _) {
-        final count = value.values.length;
-        return _statCard(
-          label: AppLocalizations.of(context).t('registered_children'),
-          value: '$count',
-          icon: Icons.groups,
-          accent: const Color(0xFF2E7D32),
-          s: s,
-        );
-      },
+    return _statCard(
+      label: AppLocalizations.of(context).t('registered_children'),
+      value: '$totalChildren',
+      icon: Icons.groups,
+      accent: const Color(0xFF2E7D32),
+      s: s,
     );
   }
 
