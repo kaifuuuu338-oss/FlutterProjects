@@ -1,7 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:my_first_app/services/api_service.dart';
-import 'package:my_first_app/screens/follow_up_screen.dart';
+import 'package:my_first_app/screens/followup_complete_screen.dart';
 
 class ReferralPage extends StatefulWidget {
   final String childId;
@@ -619,10 +619,9 @@ class _ReferralPageState extends State<ReferralPage> {
                     if (referralId.isNotEmpty) {
                       Navigator.of(context).push(
                         MaterialPageRoute(
-                          builder: (_) => FollowUpScreen(
+                          builder: (_) => FollowupCompleteScreen(
                             referralId: referralId,
                             childId: childId,
-                            baseUrl: 'http://127.0.0.1:8000',
                             userRole: 'AWW',
                           ),
                         ),

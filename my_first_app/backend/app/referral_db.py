@@ -9,13 +9,12 @@ from .database_models import Base
 # Database URL
 DATABASE_URL = os.getenv(
     "REFERRAL_DATABASE_URL",
-    "sqlite:///./referral_system.db"
+    "postgresql+psycopg2://localhost:5432/referral_system"
 )
 
 # Create engine
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
     echo=False
 )
 
