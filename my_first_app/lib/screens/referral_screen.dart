@@ -579,15 +579,15 @@ class _ReferralScreenState extends State<ReferralScreen> {
   ReferralType _toReferralType(String value) {
     switch (value) {
       case 'PHC':
-        return ReferralType.phc;
+        return ReferralType.enhancedMonitoring;
       case 'Physiotherapist':
       case 'Occupational Therapist':
       case 'Speech Therapist':
       case 'Developmental Specialist':
       case 'Child Psychologist':
-        return ReferralType.specialist;
+        return ReferralType.specialistEvaluation;
       default:
-        return ReferralType.rbsk;
+        return ReferralType.enhancedMonitoring;
     }
   }
 
@@ -604,7 +604,7 @@ class _ReferralScreenState extends State<ReferralScreen> {
   ReferralUrgency _toUrgency(String value) {
     switch (value) {
       case 'Urgent':
-        return ReferralUrgency.urgent;
+        return ReferralUrgency.priority;
       case 'Immediate':
         return ReferralUrgency.immediate;
       default:

@@ -526,8 +526,8 @@ class OfflineSQLiteService {
       childId: '${r['child_id'] ?? ''}',
       awwId: '${r['aww_id'] ?? ''}',
       referralType: ReferralType.values.firstWhere(
-        (e) => e.name.toLowerCase() == '${r['referral_type'] ?? 'rbsk'}'.toLowerCase(),
-        orElse: () => ReferralType.rbsk,
+        (e) => e.name.toLowerCase() == '${r['referral_type'] ?? 'enhancedMonitoring'}'.toLowerCase(),
+        orElse: () => ReferralType.enhancedMonitoring,
       ),
       urgency: ReferralUrgency.values.firstWhere(
         (e) => e.name.toLowerCase() == '${r['urgency'] ?? 'normal'}'.toLowerCase(),

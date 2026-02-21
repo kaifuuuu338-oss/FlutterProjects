@@ -512,3 +512,95 @@ class ProblemBService:
 
 # Singleton instance
 problem_b_service = ProblemBService()
+
+
+def _normalize_severity(value: str) -> str:
+    v = (value or "").strip().lower()
+    if v in {"critical", "high", "medium", "low", "mild", "normal"}:
+        return v
+    return "low"
+
+
+def generate_intervention_plan(payload: Dict) -> Dict:
+    """Compatibility wrapper used by main.py endpoints."""
+    child_id = str(payload.get("child_id") or "").strip()
+    if not child_id:
+        return {"status": "error", "message": "child_id is required"}
+
+    delays = {
+        "GM": int(payload.get("gm_delay", 0) or 0),
+        "FM": int(payload.get("fm_delay", 0) or 0),
+        "LC": int(payload.get("lc_delay", 0) or 0),
+        "COG": int(payload.get("cog_delay", 0) or 0),
+        "SE": int(payload.get("se_delay", 0) or 0),
+    }
+    delayed_domains = [d for d, m in delays.items() if m > 0]
+
+    risk = _normalize_severity(str(payload.get("risk_category", "low")))
+    if risk in {"critical", "high"}:
+        intensity = "High"
+    elif risk in {"medium", "mild"}:
+        intensity = "Moderate"
+    else:
+        intensity = "Low"
+
+    return {
+        "child_id": child_id,
+        "status": "ok",
+        "risk_category": payload.get("risk_category", "Low"),
+        "delayed_domains": delayed_domains,
+        "total_delays": len(delayed_domains),
+        "recommended_intensity": intensity,
+        "next_review_weeks": 6,
+        "referral_required": "YES" if risk in {"critical", "high"} else "NO",
+    }
+
+
+def adjust_intensity(current_intensity: str, trend: str) -> str:
+    levels = ["Low", "Moderate", "High"]
+    cur = (current_intensity or "Moderate").strip().title()
+    tr = (trend or "No Change").strip().lower()
+    try:
+        idx = levels.index(cur)
+    except ValueError:
+        idx = 1
+
+    if tr in {"worsened", "worsening", "declined"}:
+        idx = min(idx + 1, 2)
+    elif tr in {"improved", "improving"}:
+        idx = max(idx - 1, 0)
+
+    return levels[idx]
+
+
+def next_review_decision(adjusted_intensity: str, delay_reduction: int, trend: str) -> str:
+    t = (trend or "no change").lower()
+    if t in {"worsened", "worsening"}:
+        return "Escalate to specialist referral"
+    if int(delay_reduction or 0) >= 1 and adjusted_intensity == "Low":
+        return "Continue maintenance plan"
+    if adjusted_intensity == "High":
+        return "Reassess in 2 weeks"
+    return "Continue current plan and review in 6 weeks"
+
+
+def rule_logic_table() -> Dict:
+    return {
+        "rules": [
+            {"condition": "trend = worsened", "action": "escalate"},
+            {"condition": "adherence < 40%", "action": "intensify"},
+            {"condition": "delay reduction >= 1 and intensity low", "action": "maintenance"},
+        ]
+    }
+
+
+def schema_tables() -> Dict:
+    return {
+        "tables": [
+            "intervention_phase",
+            "activities",
+            "task_logs",
+            "review_log",
+            "referral",
+        ]
+    }
