@@ -24,22 +24,10 @@
             </div>
             <nav class="nav-links">
                 <a href="/" class="nav-link">Dashboard</a>
-                <a href="/screening/" class="nav-link">Screening</a>
+                <a href="/screening/" class="nav-link">A/B Source</a>
                 <a href="/results/" class="nav-link">Results</a>
                 {% if user.is_authenticated %}
                     <span class="nav-pill">Hi, {{ user.username }}</span>
-                    {% if user.role_profile.role == 'aww' %}
-                      <a href="/monitoring/aww/" class="nav-link">AWW Dashboard</a>
-                    {% elif user.role_profile.role == 'supervisor' %}
-                      <a href="/monitoring/supervisor/" class="nav-link">Supervisor Dashboard</a>
-                    {% elif user.role_profile.role == 'cdpo' %}
-                      <a href="/monitoring/cdpo/" class="nav-link">CDPO Dashboard</a>
-                    {% elif user.role_profile.role == 'district' %}
-                      <a href="/monitoring/district/" class="nav-link">District Dashboard</a>
-                    {% elif user.role_profile.role == 'state' %}
-                      <a href="/monitoring/state/" class="nav-link">State Dashboard</a>
-                    {% endif %}
-                    <a href="/problem-d/" class="nav-link">Problem D</a>
                     <a href="{% url 'core:logout' %}" class="nav-link">Logout</a>
                 {% else %}
                     <a href="{% url 'core:login' %}" class="nav-link">Login</a>

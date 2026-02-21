@@ -6,7 +6,7 @@ import 'package:my_first_app/core/constants/neuro_behavioral_question_bank.dart'
 import 'package:my_first_app/core/localization/app_localizations.dart';
 import 'package:my_first_app/models/child_model.dart';
 import 'package:my_first_app/models/screening_model.dart';
-import 'package:my_first_app/screens/behavioral_psychosocial_summary_screen.dart';
+import 'package:my_first_app/screens/problem_a_environment_screen.dart';
 import 'package:my_first_app/services/api_service.dart';
 import 'package:my_first_app/services/local_db_service.dart';
 import 'package:my_first_app/widgets/question_card.dart';
@@ -175,19 +175,6 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
     }
   }
 
-  int _riskBonus(String risk, {required int high, required int moderate}) {
-    final r = risk.trim().toLowerCase();
-    if (r == 'high' || r == 'critical') return high;
-    if (r == 'medium' || r == 'moderate') return moderate;
-    return 0;
-  }
-
-  String _baselineCategoryFromScore(int score) {
-    if (score <= 10) return 'Low';
-    if (score <= 25) return 'Medium';
-    return 'High';
-  }
-
   _RiskCalc _computeRisk(List<NeuroQuestion> questions, Map<int, int> answers) {
     var weightedScore = 0.0;
     var maxScore = 0.0;
@@ -204,8 +191,16 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
     final p1 = 1.0 / (1.0 + math.exp(-(weightedScore - t1)));
     final p2 = 1.0 / (1.0 + math.exp(-(weightedScore - t2)));
 
-    // Soft-boundary classification
-    final code = p1 < 0.5 ? 0 : (p2 < 0.5 ? 1 : 2);
+    // Direct threshold classification:
+    // S < T1 => Low, T1 <= S < T2 => Medium, S >= T2 => High
+    int code;
+    if (weightedScore < t1) {
+      code = 0;
+    } else if (weightedScore < t2) {
+      code = 1;
+    } else {
+      code = 2;
+    }
     final normalizedRisk = maxScore == 0 ? 0.0 : weightedScore / maxScore;
 
     return _RiskCalc(
@@ -370,34 +365,25 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
       'BPS_BEH': _riskLabelFromCode(behaviorCalc.code),
     };
 
-    final delayCount = widget.delaySummary?['num_delays'] ?? 0;
-    final autismBonus = _riskBonus(_riskLabelFromCode(autismCalc.code), high: 15, moderate: 8);
-    final adhdBonus = _riskBonus(_riskLabelFromCode(adhdCalc.code), high: 8, moderate: 4);
-    final behaviorBonus = _riskBonus(_riskLabelFromCode(behaviorCalc.code), high: 7, moderate: 0);
-    final baselineScore = delayCount * 5 + autismBonus + adhdBonus + behaviorBonus;
-    final baselineCategory = _baselineCategoryFromScore(baselineScore);
-
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
-        builder: (_) => BehavioralPsychosocialSummaryScreen(
+        builder: (_) => ProblemAEnvironmentScreen(
           childId: widget.childId,
           awwId: widget.awwId,
           ageMonths: widget.ageMonths,
           genderLabel: AppLocalizations.of(context).t((_child?.gender ?? 'M') == 'F' ? 'gender_female' : 'gender_male'),
+          genderCode: (_child?.gender ?? 'M'),
           awcCode: _child?.awcCode ?? '',
           overallRisk: _riskLabelFromCode(worstCode),
           autismRisk: _riskLabelFromCode(autismCalc.code),
           adhdRisk: _riskLabelFromCode(adhdCalc.code),
           behaviorRisk: _riskLabelFromCode(behaviorCalc.code),
-          baselineScore: baselineScore,
-          baselineCategory: baselineCategory,
-          immunizationStatus: 'unknown',
           weightKg: weight,
           heightCm: height,
           muacCm: muac,
           birthWeightKg: birthWeight,
           hemoglobin: hb,
-          illnessHistory: _recentIllness == 'Yes' ? 'Recent illness: Yes' : 'No recent illness',
+          recentIllness: _recentIllness,
           domainScores: summaryDomainScores,
           domainRiskLevels: summaryDomainRiskLevels,
           missedMilestones: widget.missedMilestones,
@@ -433,7 +419,7 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Screening 2/3 - Neuro-Behavioral', style: TextStyle(color: Color(0xFF37474F), fontWeight: FontWeight.w700)),
+                const Text('Screening 2/4 - Neuro-Behavioral', style: TextStyle(color: Color(0xFF37474F), fontWeight: FontWeight.w700)),
                 const SizedBox(height: 8),
                 Text(_child?.childName ?? widget.childId, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
                 const SizedBox(height: 4),

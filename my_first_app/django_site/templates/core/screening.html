@@ -1,53 +1,23 @@
 {% extends 'base.html' %}
-{% block title %}New Screening{% endblock %}
+{% block title %}Problem A/B Source Only{% endblock %}
 {% block content %}
 <section class="section form-shell">
   <div class="section-header">
-    <h2>Baseline Screening</h2>
-    <span class="tag">Step 1 of 3</span>
+    <h2>{{ title|default:"Problem A/B Screening Source" }}</h2>
+    <span class="tag">Read Only</span>
   </div>
   <div class="form-card">
+    {% if error_message %}
+      <div class="alert">{{ error_message }}</div>
+    {% endif %}
     <div class="form-intro">
-      Capture baseline milestones for the child. Use the mobile app workflow as reference.
+      Screening must happen in Problem A/B app only.
+      This page is only an information bridge to avoid duplicate data entry.
     </div>
-    <form method="post" class="form-grid">
-      {% csrf_token %}
-      <div class="form-field">
-        <label for="child_name">Child name</label>
-        <input type="text" id="child_name" name="child_name" placeholder="e.g., Aarav" required />
-      </div>
-      <div class="form-field">
-        <label for="gender">Gender</label>
-        <select id="gender" name="gender">
-          <option value="Male">Male</option>
-          <option value="Female">Female</option>
-          <option value="Other">Other</option>
-        </select>
-      </div>
-      <div class="form-field">
-        <label for="age_months">Age (months)</label>
-        <input type="number" id="age_months" name="age_months" placeholder="e.g., 18" required />
-      </div>
-      <div class="form-field">
-        <label for="awc_id">AWC ID</label>
-        <input type="text" id="awc_id" name="awc_id" placeholder="AWC001" value="AWC001" />
-      </div>
-      <div class="form-field">
-        <label for="sector_id">Sector ID</label>
-        <input type="text" id="sector_id" name="sector_id" placeholder="SEC001" value="SEC001" />
-      </div>
-      <div class="form-field">
-        <label for="mandal_id">Mandal ID</label>
-        <input type="text" id="mandal_id" name="mandal_id" placeholder="MANDAL001" value="MANDAL001" />
-      </div>
-      <div class="form-field">
-        <label for="district_id">District ID</label>
-        <input type="text" id="district_id" name="district_id" placeholder="DISTRICT001" value="DISTRICT001" />
-      </div>
-      <div class="form-field full">
-        <button type="submit" class="btn primary">Submit Screening</button>
-      </div>
-    </form>
+    <div class="results-actions">
+      <a href="/" class="btn primary">Back to Dashboard</a>
+      <a href="/results/" class="btn ghost">View Latest Results</a>
+    </div>
   </div>
 </section>
 {% endblock %}

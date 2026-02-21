@@ -1,23 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:my_first_app/core/localization/app_localizations.dart';
+import 'package:my_first_app/models/child_model.dart';
 import 'package:my_first_app/models/referral_model.dart';
-import 'package:my_first_app/screens/referral_details_screen.dart';
+import 'package:my_first_app/models/screening_model.dart';
+import 'package:my_first_app/screens/dashboard_screen.dart';
+import 'package:my_first_app/screens/referral_batch_summary_screen.dart';
+import 'package:my_first_app/screens/result_screen.dart';
+import 'package:my_first_app/screens/settings_screen.dart';
 import 'package:my_first_app/services/api_service.dart';
 import 'package:my_first_app/services/local_db_service.dart';
+import 'package:my_first_app/widgets/language_menu_button.dart';
 
 class ReferralScreen extends StatefulWidget {
   final String childId;
   final String awwId;
   final int ageMonths;
-  final String overallRisk; // low | medium | high | critical
+  final String overallRisk; // 'low'|'medium'|'high'|'critical'
   final Map<String, double> domainScores;
   final Map<String, String>? domainRiskLevels;
-
-  // Review-driven escalation flags for medium-risk referral.
-  final bool noImprovementAfterTwoReviews;
-  final bool persistentComplianceBelow40;
-  final bool worseningDelayTrend;
-  final bool multipleCriticalDomains;
 
   const ReferralScreen({
     super.key,
@@ -27,10 +27,6 @@ class ReferralScreen extends StatefulWidget {
     required this.overallRisk,
     required this.domainScores,
     this.domainRiskLevels,
-    this.noImprovementAfterTwoReviews = false,
-    this.persistentComplianceBelow40 = false,
-    this.worseningDelayTrend = false,
-    this.multipleCriticalDomains = false,
   });
 
   @override
@@ -38,132 +34,479 @@ class ReferralScreen extends StatefulWidget {
 }
 
 class _ReferralScreenState extends State<ReferralScreen> {
-  bool _submitting = false;
+  final _formKey = GlobalKey<FormState>();
+  final LocalDBService _localDb = LocalDBService();
+  bool submitting = false;
 
-  late final _DomainRisk _highestDomain;
-  late final String _effectiveRisk;
-  late final _ReferralPolicy _policy;
-  late final List<String> _reviewEscalationReasons;
-  late final bool _canGenerateReferral;
+  final List<String> referralTypes = [
+    'Physiotherapist',
+    'Occupational Therapist',
+    'Speech Therapist',
+    'Developmental Specialist',
+    'Child Psychologist',
+    'RBSK',
+    'PHC',
+  ];
+  final List<String> urgencies = ['Normal', 'Urgent', 'Immediate'];
+  final List<_DomainRisk> _domainRisks = [];
+  final List<_ReferralRecommendation> _recommendations = [];
+  final List<_ReferralDraft> _referralDrafts = [];
+  List<_DomainRisk> _recommendedDomains = [];
 
   @override
   void initState() {
     super.initState();
-    final domainRisks = _buildDomainRisks();
-    _highestDomain = domainRisks.isEmpty
-        ? const _DomainRisk(key: 'N/A', risk: 'low', severity: 0)
-        : domainRisks.reduce((a, b) => a.severity >= b.severity ? a : b);
-
-    final overall = _normalizeRisk(widget.overallRisk);
-    _effectiveRisk = _severity(overall) >= _highestDomain.severity
-        ? overall
-        : _highestDomain.risk;
-
-    _reviewEscalationReasons = _buildReviewEscalationReasons();
-    _policy = _policyForRisk(_effectiveRisk);
-    _canGenerateReferral = _shouldGenerateReferral();
+    _initDomainRisks();
+    _applyRecommendation();
   }
 
-  List<_DomainRisk> _buildDomainRisks() {
-    final out = <_DomainRisk>[];
+  @override
+  void dispose() {
+    for (final draft in _referralDrafts) {
+      draft.notesController.dispose();
+    }
+    super.dispose();
+  }
+
+  void _initDomainRisks() {
+    _domainRisks.clear();
     final labels = widget.domainRiskLevels ?? {};
-    for (final entry in widget.domainScores.entries) {
-      final label = labels[entry.key] ?? _riskFromScore(entry.value);
-      out.add(
+    widget.domainScores.forEach((key, value) {
+      final riskLabel = labels[key] ?? _riskFromScore(value);
+      _domainRisks.add(
         _DomainRisk(
-          key: entry.key,
-          risk: _normalizeRisk(label),
-          severity: _severity(label),
+          key: key,
+          risk: _formatRisk(riskLabel),
+          score: value,
+          severity: _riskSeverity(riskLabel),
         ),
       );
-    }
+    });
     for (final entry in labels.entries) {
-      if (out.any((d) => d.key == entry.key)) continue;
-      out.add(
+      if (_domainRisks.any((d) => d.key == entry.key)) continue;
+      _domainRisks.add(
         _DomainRisk(
           key: entry.key,
-          risk: _normalizeRisk(entry.value),
-          severity: _severity(entry.value),
+          risk: _formatRisk(entry.value),
+          score: null,
+          severity: _riskSeverity(entry.value),
         ),
       );
     }
-    return out;
+    _domainRisks.sort((a, b) {
+      final bySeverity = b.severity.compareTo(a.severity);
+      if (bySeverity != 0) return bySeverity;
+      final aScore = a.score ?? 1.0;
+      final bScore = b.score ?? 1.0;
+      return aScore.compareTo(bScore);
+    });
   }
 
-  List<String> _buildReviewEscalationReasons() {
-    final reasons = <String>[];
-    if (widget.noImprovementAfterTwoReviews) {
-      reasons.add('No improvement after 2 review cycles');
+  void _applyRecommendation() {
+    final recommendedDomains = _domainRisks.where((d) => d.severity >= 3).toList();
+
+    _recommendations.clear();
+    if (recommendedDomains.isNotEmpty) {
+      for (final domain in recommendedDomains) {
+        final rec = _recommendationForSeverity(domain.severity);
+        final referralType = _referralTypeForDomain(domain);
+        _recommendations.add(
+          _ReferralRecommendation(
+            domain: domain,
+            referralType: referralType,
+            urgency: rec.urgency,
+            followUpDate: rec.followUpDate,
+          ),
+        );
+      }
     }
-    if (widget.persistentComplianceBelow40) {
-      reasons.add('Compliance below 40% persistently');
-    }
-    if (widget.worseningDelayTrend) {
-      reasons.add('Delay trend worsening');
-    }
-    if (widget.multipleCriticalDomains) {
-      reasons.add('Multiple domains marked critical');
-    }
-    return reasons;
+
+    _recommendedDomains = recommendedDomains;
+    _resetDrafts();
   }
 
-  _ReferralPolicy _policyForRisk(String risk) {
-    switch (_normalizeRisk(risk)) {
-      case 'critical':
-        return _ReferralPolicy(
-          referralTypeLabel: 'Immediate Specialist Referral',
-          type: ReferralType.immediateSpecialistReferral,
-          urgency: ReferralUrgency.immediate,
-          urgencyLabel: 'Immediate',
-          followUpDays: 2,
-          handledAt: 'District specialist',
-        );
-      case 'high':
-        return _ReferralPolicy(
-          referralTypeLabel: 'Specialist Evaluation',
-          type: ReferralType.specialistEvaluation,
-          urgency: ReferralUrgency.priority,
-          urgencyLabel: 'Priority',
-          followUpDays: 10,
-          handledAt: 'Block / District specialist',
-        );
-      case 'medium':
-        return _ReferralPolicy(
-          referralTypeLabel: 'Enhanced Monitoring',
-          type: ReferralType.enhancedMonitoring,
-          urgency: ReferralUrgency.normal,
-          urgencyLabel: 'Normal',
-          followUpDays: 30,
-          handledAt: 'AWW / Block level',
-        );
+  void _openDashboard() {
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const DashboardScreen()),
+    );
+  }
+
+  Future<void> _viewRegisteredChildren() async {
+    await _localDb.initialize();
+    final children = _localDb.getAllChildren();
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(AppLocalizations.of(context).t('registered_children')),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: children.isEmpty
+              ? Text(AppLocalizations.of(context).t('no_children_registered'))
+              : ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: children.length,
+                  itemBuilder: (context, index) {
+                    final c = children[index];
+                    final genderLabel = c.gender == 'M'
+                        ? AppLocalizations.of(context).t('gender_male')
+                        : AppLocalizations.of(context).t('gender_female');
+                    return ListTile(
+                      title: Text(c.childId),
+                      subtitle: Text('${AppLocalizations.of(context).t('age_with_months', {'age': '${c.ageMonths}'})} | $genderLabel'),
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(AppLocalizations.of(context).t('close')),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _viewPastResults() async {
+    await _localDb.initialize();
+    final children = _localDb.getAllChildren();
+    final past = <ScreeningModel>[];
+    for (final ChildModel c in children) {
+      past.addAll(_localDb.getChildScreenings(c.childId));
+    }
+    past.sort((a, b) => b.screeningDate.compareTo(a.screeningDate));
+
+    if (!mounted) return;
+    if (past.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppLocalizations.of(context).t('no_past_results'))),
+      );
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      builder: (_) => ListView.builder(
+        itemCount: past.length,
+        itemBuilder: (context, index) {
+          final s = past[index];
+          final risk = s.overallRisk.toString().split('.').last;
+          return ListTile(
+            title: Text('${s.childId} - ${AppLocalizations.of(context).t(risk.toLowerCase()).toUpperCase()}'),
+            subtitle: Text(AppLocalizations.of(context).t('date_label', {'date': '${s.screeningDate.toLocal()}'})),
+            trailing: const Icon(Icons.open_in_new),
+            onTap: () {
+              Navigator.of(context).pop();
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => ResultScreen(
+                    domainScores: s.domainScores,
+                    overallRisk: risk,
+                    missedMilestones: s.missedMilestones,
+                    explainability: s.explainability,
+                    childId: s.childId,
+                    awwId: s.awwId,
+                    ageMonths: s.ageMonths,
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _showRiskStatus() async {
+    await _localDb.initialize();
+    final children = _localDb.getAllChildren();
+    final all = <ScreeningModel>[];
+    for (final ChildModel c in children) {
+      all.addAll(_localDb.getChildScreenings(c.childId));
+    }
+    final low = all.where((s) => s.overallRisk == RiskLevel.low).length;
+    final medium = all.where((s) => s.overallRisk == RiskLevel.medium).length;
+    final high = all.where((s) => s.overallRisk == RiskLevel.high).length;
+    final critical = all.where((s) => s.overallRisk == RiskLevel.critical).length;
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(AppLocalizations.of(context).t('risk_status')),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('${AppLocalizations.of(context).t('low')}: $low'),
+            Text('${AppLocalizations.of(context).t('medium')}: $medium'),
+            Text('${AppLocalizations.of(context).t('high')}: $high'),
+            Text('${AppLocalizations.of(context).t('critical')}: $critical'),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(AppLocalizations.of(context).t('ok'))),
+        ],
+      ),
+    );
+  }
+
+  void _openSettings() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const SettingsScreen()),
+    );
+  }
+
+  Widget _buildSideNav() {
+    return Container(
+      width: 220,
+      color: const Color(0xFFF5F5F5),
+      child: Column(
+        children: [
+          const SizedBox(height: 18),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12.0),
+            child: Row(
+              children: [
+                ClipOval(
+                  child: Image.asset('assets/images/ap_logo.png', width: 36, height: 36, fit: BoxFit.cover),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    AppLocalizations.of(context).t('govt_andhra_pradesh'),
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 22),
+          ListTile(
+            leading: const Icon(Icons.dashboard),
+            title: Text(AppLocalizations.of(context).t('dashboard')),
+            onTap: _openDashboard,
+          ),
+          ListTile(
+            leading: const Icon(Icons.child_care),
+            title: Text(AppLocalizations.of(context).t('children')),
+            onTap: _viewRegisteredChildren,
+          ),
+          ListTile(
+            leading: const Icon(Icons.bar_chart),
+            title: Text(AppLocalizations.of(context).t('risk_status')),
+            onTap: _showRiskStatus,
+          ),
+          ListTile(
+            leading: const Icon(Icons.show_chart),
+            title: Text(AppLocalizations.of(context).t('view_past_results')),
+            onTap: _viewPastResults,
+          ),
+          ListTile(
+            leading: const Icon(Icons.settings),
+            title: Text(AppLocalizations.of(context).t('settings')),
+            onTap: _openSettings,
+          ),
+          const Spacer(),
+        ],
+      ),
+    );
+  }
+
+  void _resetDrafts() {
+    for (final draft in _referralDrafts) {
+      draft.notesController.dispose();
+    }
+    _referralDrafts.clear();
+    for (final rec in _recommendations) {
+      _referralDrafts.add(
+        _ReferralDraft(
+          domain: rec.domain,
+          referralType: rec.referralType,
+          recommendedReferralType: rec.referralType,
+          urgency: rec.urgency,
+          recommendedUrgency: rec.urgency,
+          followUpDate: rec.followUpDate,
+          recommendedFollowUpDate: rec.followUpDate,
+          notesController: TextEditingController(),
+        ),
+      );
+    }
+  }
+
+  _ReferralRecommendation _recommendationForSeverity(int severity) {
+    if (severity >= 3) {
+      return _ReferralRecommendation(
+        domain: null,
+        referralType: 'PHC',
+        urgency: 'Immediate',
+        followUpDate: DateTime.now().add(const Duration(days: 2)),
+      );
+    }
+    if (severity >= 2) {
+      return _ReferralRecommendation(
+        domain: null,
+        referralType: 'RBSK',
+        urgency: 'Urgent',
+        followUpDate: DateTime.now().add(const Duration(days: 7)),
+      );
+    }
+    return _ReferralRecommendation(
+      domain: null,
+      referralType: 'RBSK',
+      urgency: 'Normal',
+      followUpDate: DateTime.now().add(const Duration(days: 14)),
+    );
+  }
+
+  String _referralTypeForDomain(_DomainRisk domain) {
+    switch (domain.key) {
+      case 'GM':
+        return 'Physiotherapist';
+      case 'FM':
+        return 'Occupational Therapist';
+      case 'LC':
+        return 'Speech Therapist';
+      case 'COG':
+        return 'Developmental Specialist';
+      case 'SE':
+        return 'Child Psychologist';
       default:
-        return _ReferralPolicy(
-          referralTypeLabel: 'Not Required',
-          type: ReferralType.enhancedMonitoring,
-          urgency: ReferralUrgency.normal,
-          urgencyLabel: 'Normal',
-          followUpDays: 30,
-          handledAt: 'AWW level',
-        );
+        return 'RBSK';
     }
   }
 
-  bool _shouldGenerateReferral() {
-    final risk = _normalizeRisk(_effectiveRisk);
-    if (risk == 'critical' || risk == 'high' || risk == 'medium') return true;
-    return false;
+  Future<void> _pickDate(_ReferralDraft draft) async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: now.add(const Duration(days: 7)),
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 365)),
+    );
+    if (picked != null) {
+      setState(() => draft.followUpDate = picked);
+    }
   }
 
-  String _riskFromScore(double v) {
-    if (v <= 0.4) return 'critical';
-    if (v <= 0.6) return 'high';
-    if (v <= 0.8) return 'medium';
-    return 'low';
+  Future<void> _createReferral() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => submitting = true);
+    final l10n = AppLocalizations.of(context);
+
+    final now = DateTime.now();
+    final drafts = _referralDrafts.isNotEmpty ? _referralDrafts : <_ReferralDraft>[];
+    try {
+      final api = APIService();
+      final localDb = LocalDBService();
+      await localDb.initialize();
+      var index = 0;
+      for (final draft in drafts) {
+        index += 1;
+        final domain = draft.domain;
+        final referralId = 'ref_${now.millisecondsSinceEpoch}_$index';
+        final reasons = domain == null
+            ? <String>[]
+            : ['${_domainLabel(domain.key, l10n)} (${_riskLabel(domain.risk, l10n)})'];
+        final noteText = draft.notesController.text.trim().isNotEmpty
+            ? draft.notesController.text.trim()
+            : (reasons.isEmpty ? '' : l10n.t('referral_suggested_due_to', {'reasons': reasons.join(', ')}));
+
+        final payload = {
+          'child_id': widget.childId,
+          'aww_id': widget.awwId,
+          'age_months': widget.ageMonths,
+          'overall_risk': widget.overallRisk,
+          'domain_scores': widget.domainScores,
+          'referral_type': _backendReferralType(draft.referralType),
+          'urgency': draft.urgency,
+          'expected_follow_up': draft.followUpDate.toIso8601String(),
+          'notes': noteText,
+          'referral_timestamp': now.toIso8601String(),
+        };
+
+        await api.createReferral(payload);
+        await localDb.saveReferral(
+          ReferralModel(
+            referralId: referralId,
+            screeningId: 'unknown_screening',
+            childId: widget.childId,
+            awwId: widget.awwId,
+            referralType: _toReferralType(draft.referralType),
+            urgency: _toUrgency(draft.urgency),
+            status: ReferralStatus.pending,
+            notes: noteText,
+            expectedFollowUpDate: draft.followUpDate,
+            createdAt: now,
+              metadata: {
+                'sync_status': 'synced',
+                'domain': domain?.key,
+                'domain_risk': domain?.risk,
+                'overall_risk': _normalizeRisk(domain?.risk ?? widget.overallRisk),
+                'referral_type_label': draft.referralType,
+                'age_months': widget.ageMonths,
+            },
+          ),
+        );
+
+      }
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => ReferralBatchSummaryScreen(childId: widget.childId),
+        ),
+      );
+    } catch (e) {
+      final localDb = LocalDBService();
+      await localDb.initialize();
+      var index = 0;
+      for (final draft in drafts) {
+        index += 1;
+        final domain = draft.domain;
+        final referralId = 'ref_${now.millisecondsSinceEpoch}_$index';
+        final reasons = domain == null
+            ? <String>[]
+            : ['${_domainLabel(domain.key, l10n)} (${_riskLabel(domain.risk, l10n)})'];
+        final noteText = draft.notesController.text.trim().isNotEmpty
+            ? draft.notesController.text.trim()
+            : (reasons.isEmpty ? '' : l10n.t('referral_suggested_due_to', {'reasons': reasons.join(', ')}));
+
+        await localDb.saveReferral(
+          ReferralModel(
+            referralId: referralId,
+            screeningId: 'offline_referral',
+            childId: widget.childId,
+            awwId: widget.awwId,
+            referralType: _toReferralType(draft.referralType),
+            urgency: _toUrgency(draft.urgency),
+            status: ReferralStatus.pending,
+            notes: noteText,
+            expectedFollowUpDate: draft.followUpDate,
+            createdAt: now,
+            metadata: {
+              'sync_status': 'not_synced',
+              'domain': domain?.key,
+              'domain_risk': domain?.risk,
+              'overall_risk': _normalizeRisk(domain?.risk ?? widget.overallRisk),
+              'referral_type_label': draft.referralType,
+              'age_months': widget.ageMonths,
+            },
+          ),
+        );
+
+      }
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => ReferralBatchSummaryScreen(childId: widget.childId),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => submitting = false);
+    }
   }
 
-  String _normalizeRisk(String risk) => risk.trim().toLowerCase();
-
-  int _severity(String risk) {
+  int _riskSeverity(String risk) {
     switch (_normalizeRisk(risk)) {
       case 'critical':
         return 3;
@@ -176,17 +519,18 @@ class _ReferralScreenState extends State<ReferralScreen> {
     }
   }
 
-  String _riskLabel(String risk, AppLocalizations l10n) {
-    switch (_normalizeRisk(risk)) {
-      case 'critical':
-        return l10n.t('critical');
-      case 'high':
-        return l10n.t('high');
-      case 'medium':
-        return l10n.t('medium');
-      default:
-        return l10n.t('low');
-    }
+  String _riskFromScore(double v) {
+    if (v <= 0.4) return 'Critical';
+    if (v <= 0.6) return 'High';
+    if (v <= 0.8) return 'Medium';
+    return 'Low';
+  }
+
+  String _normalizeRisk(String risk) => risk.trim().toLowerCase();
+
+  String _formatRisk(String risk) {
+    final n = _normalizeRisk(risk);
+    return n.isEmpty ? risk : '${n[0].toUpperCase()}${n.substring(1)}';
   }
 
   String _domainLabel(String key, AppLocalizations l10n) {
@@ -206,278 +550,331 @@ class _ReferralScreenState extends State<ReferralScreen> {
     }
   }
 
-  String _backendReferralType(ReferralType type) {
-    if (type == ReferralType.enhancedMonitoring) return 'RBSK';
-    return 'PHC';
-  }
-
-  String _backendUrgency(ReferralUrgency urgency) {
-    switch (urgency) {
-      case ReferralUrgency.priority:
-        return 'Priority';
-      case ReferralUrgency.immediate:
-        return 'Immediate';
+  String _riskLabel(String riskKey, AppLocalizations l10n) {
+    switch (_normalizeRisk(riskKey)) {
+      case 'critical':
+        return l10n.t('critical');
+      case 'high':
+        return l10n.t('high');
+      case 'medium':
+        return l10n.t('medium');
+      case 'low':
+        return l10n.t('low');
       default:
-        return 'Normal';
+        return riskKey;
     }
   }
 
-  Future<void> _createReferral() async {
-    if (!_canGenerateReferral) return;
-    setState(() => _submitting = true);
+  String _urgencyLabel(String value, AppLocalizations l10n) {
+    switch (value) {
+      case 'Immediate':
+        return l10n.t('urgency_immediate');
+      case 'Urgent':
+        return l10n.t('urgency_urgent');
+      default:
+        return l10n.t('urgency_normal');
+    }
+  }
+
+  ReferralType _toReferralType(String value) {
+    switch (value) {
+      case 'PHC':
+        return ReferralType.phc;
+      case 'Physiotherapist':
+      case 'Occupational Therapist':
+      case 'Speech Therapist':
+      case 'Developmental Specialist':
+      case 'Child Psychologist':
+        return ReferralType.specialist;
+      default:
+        return ReferralType.rbsk;
+    }
+  }
+
+  String _backendReferralType(String value) {
+    switch (value) {
+      case 'PHC':
+      case 'RBSK':
+        return value;
+      default:
+        return 'PHC';
+    }
+  }
+
+  ReferralUrgency _toUrgency(String value) {
+    switch (value) {
+      case 'Urgent':
+        return ReferralUrgency.urgent;
+      case 'Immediate':
+        return ReferralUrgency.immediate;
+      default:
+        return ReferralUrgency.normal;
+    }
+  }
+
+  Widget _buildDraftCard(_ReferralDraft draft) {
     final l10n = AppLocalizations.of(context);
-    final now = DateTime.now();
+    final hasDomain = draft.domain != null;
+    final chipColor = hasDomain ? const Color(0xFFFFEBEE) : const Color(0xFFE8F5E9);
+    final chipText = hasDomain ? const Color(0xFFE53935) : const Color(0xFF2E7D32);
+    final domainLabel = hasDomain ? _domainLabel(draft.domain!.key, l10n) : '';
+    final riskLabel = hasDomain ? _riskLabel(draft.domain!.risk, l10n) : '';
 
-    try {
-      final api = APIService();
-      final localDb = LocalDBService();
-      await localDb.initialize();
-      try {
-        final serverReferral = await api.getReferralByChild(widget.childId);
-        final serverReferralId = '${serverReferral['referral_id'] ?? ''}'
-            .trim();
-        if (serverReferralId.isNotEmpty) {
-          final serverCreatedOn =
-              DateTime.tryParse('${serverReferral['created_on'] ?? ''}') ?? now;
-          final serverFollowUpBy =
-              DateTime.tryParse('${serverReferral['followup_by'] ?? ''}') ??
-              now.add(Duration(days: _policy.followUpDays));
-          if (mounted) {
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(
-                builder: (_) => ReferralDetailsScreen(
-                  referralId: serverReferralId,
-                  childId: widget.childId,
-                  awwId: widget.awwId,
-                  ageMonths: widget.ageMonths,
-                  overallRisk: _effectiveRisk,
-                  referralType:
-                      '${serverReferral['referral_type_label'] ?? _policy.referralTypeLabel}',
-                  urgency:
-                      '${serverReferral['urgency'] ?? _policy.urgencyLabel}',
-                  status: '${serverReferral['status'] ?? 'Pending'}',
-                  createdAt: serverCreatedOn,
-                  expectedFollowUpDate: serverFollowUpBy,
-                  notes: null,
-                  reasons: <String>[
-                    '${_domainLabel(_highestDomain.key, l10n)} (${_riskLabel(_highestDomain.risk, l10n)})',
-                  ],
-                ),
+    return Card(
+      color: const Color(0xFFF7FAFF),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(l10n.t('create_referral'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+            const SizedBox(height: 6),
+            Text(
+              l10n.t(
+                'recommended_referral',
+                {
+                  'type': draft.referralType,
+                  'urgency': _urgencyLabel(draft.urgency, l10n),
+                },
               ),
-            );
-          }
-          return;
-        }
-      } catch (_) {
-        // Fallback to local lookup/create when backend lookup is unavailable.
-      }
-
-      final existing = localDb.getChildReferrals(widget.childId)
-        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-      if (existing.isNotEmpty) {
-        final latest = existing.first;
-        if (mounted) {
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(
-              builder: (_) => ReferralDetailsScreen(
-                referralId: latest.referralId,
-                childId: latest.childId,
-                awwId: latest.awwId,
-                ageMonths: widget.ageMonths,
-                overallRisk: _effectiveRisk,
-                referralType: _policy.referralTypeLabel,
-                urgency: _policy.urgencyLabel,
-                status: latest.status.toString().split('.').last,
-                createdAt: latest.createdAt,
-                expectedFollowUpDate: latest.expectedFollowUpDate,
-                notes: latest.notes,
-                reasons: <String>[
-                  (latest.metadata?['domain_reason']
-                              ?.toString()
-                              .trim()
-                              .isNotEmpty ??
-                          false)
-                      ? latest.metadata!['domain_reason'].toString()
-                      : '${_domainLabel(_highestDomain.key, l10n)} (${_riskLabel(_highestDomain.risk, l10n)})',
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 6),
+            if (!hasDomain)
+              Text(l10n.t('no_high_critical_domains'), style: const TextStyle(fontSize: 12))
+            else
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(color: chipColor, borderRadius: BorderRadius.circular(12)),
+                    child: Text(
+                      '$domainLabel ($riskLabel)',
+                      style: TextStyle(fontSize: 11, color: chipText, fontWeight: FontWeight.w600),
+                    ),
+                  ),
                 ],
               ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: draft.referralType,
+              items: referralTypes.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+              onChanged: (v) => setState(() => draft.referralType = v ?? draft.referralType),
+              decoration: InputDecoration(labelText: l10n.t('referral_type')),
             ),
-          );
-        }
-        return;
-      }
-
-      final followUpBy = now.add(Duration(days: _policy.followUpDays));
-      final domainReason =
-          '${_domainLabel(_highestDomain.key, l10n)} (${_riskLabel(_highestDomain.risk, l10n)})';
-      final notes = _reviewEscalationReasons.isEmpty
-          ? domainReason
-          : '$domainReason | ${_reviewEscalationReasons.join('; ')}';
-      final payload = {
-        'child_id': widget.childId,
-        'aww_id': widget.awwId,
-        'age_months': widget.ageMonths,
-        'overall_risk': _effectiveRisk,
-        'domain_scores': widget.domainScores,
-        'referral_type': _backendReferralType(_policy.type),
-        'urgency': _backendUrgency(_policy.urgency),
-        'expected_follow_up': followUpBy.toIso8601String(),
-        'notes': notes,
-        'referral_timestamp': now.toIso8601String(),
-      };
-
-      String referralId;
-      bool synced = true;
-      try {
-        final server = await api.createReferral(payload);
-        referralId = (server['referral_id']?.toString().isNotEmpty ?? false)
-            ? server['referral_id'].toString()
-            : 'ref_${now.millisecondsSinceEpoch}';
-      } catch (_) {
-        referralId = 'ref_${now.millisecondsSinceEpoch}';
-        synced = false;
-      }
-
-      final localReferral = ReferralModel(
-        referralId: referralId,
-        screeningId: synced
-            ? 'problem_b_referral'
-            : 'problem_b_referral_offline',
-        childId: widget.childId,
-        awwId: widget.awwId,
-        referralType: _policy.type,
-        urgency: _policy.urgency,
-        status: ReferralStatus.pending,
-        notes: notes,
-        expectedFollowUpDate: followUpBy,
-        createdAt: now,
-        metadata: {
-          'child_id': widget.childId,
-          'risk_level': _effectiveRisk,
-          'domain': _highestDomain.key,
-          'domain_risk': _highestDomain.risk,
-          'domain_reason': domainReason,
-          'urgency': _policy.urgencyLabel,
-          'created_on': now.toIso8601String(),
-          'followup_by': followUpBy.toIso8601String(),
-          'status': 'Pending',
-          if (!synced) 'sync_status': 'not_synced',
-        },
-      );
-      await localDb.saveReferral(localReferral);
-
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (_) => ReferralDetailsScreen(
-              referralId: referralId,
-              childId: widget.childId,
-              awwId: widget.awwId,
-              ageMonths: widget.ageMonths,
-              overallRisk: _effectiveRisk,
-              referralType: _policy.referralTypeLabel,
-              urgency: _policy.urgencyLabel,
-              status: 'pending',
-              createdAt: now,
-              expectedFollowUpDate: followUpBy,
-              notes: notes,
-              reasons: <String>[domainReason],
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: draft.urgency,
+              items: urgencies.map((u) => DropdownMenuItem(value: u, child: Text(_urgencyLabel(u, l10n)))).toList(),
+              onChanged: (v) => setState(() => draft.urgency = v ?? draft.urgency),
+              decoration: InputDecoration(labelText: l10n.t('urgency')),
             ),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error creating referrals: $e')));
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _submitting = false);
-      }
-    }
+            const SizedBox(height: 12),
+            Container(
+              decoration: BoxDecoration(
+                border: Border.all(color: const Color(0xFFE0E6ED)),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: ListTile(
+                title: Text(l10n.t('expected_followup_date')),
+                subtitle: Text(
+                  '${draft.followUpDate.year}-${draft.followUpDate.month.toString().padLeft(2, '0')}-${draft.followUpDate.day.toString().padLeft(2, '0')}',
+                ),
+                trailing: OutlinedButton(
+                  onPressed: () => _pickDate(draft),
+                  child: Text(l10n.t('pick_date')),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              maxLines: 3,
+              controller: draft.notesController,
+              decoration: InputDecoration(labelText: l10n.t('notes')),
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: () {
+                  setState(() {
+                    draft.referralType = draft.recommendedReferralType;
+                    draft.urgency = draft.recommendedUrgency;
+                    draft.followUpDate = draft.recommendedFollowUpDate;
+                    if (hasDomain) {
+                      final reasons = '$domainLabel ($riskLabel)';
+                      draft.notesController.text = l10n.t('referral_suggested_due_to', {'reasons': reasons});
+                    }
+                  });
+                },
+                child: Text(l10n.t('use_recommendation')),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final riskLabel = _riskLabel(_effectiveRisk, l10n).toUpperCase();
-
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isWide = screenWidth >= 900;
+    final headerHeight = isWide ? 200.0 : 170.0;
     return Scaffold(
-      appBar: AppBar(title: Text(l10n.t('create_referral'))),
-      body: ListView(
-        padding: const EdgeInsets.all(14),
-        children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Risk Level: $riskLabel',
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Referral Required: ${_canGenerateReferral ? 'Yes' : 'No'}',
-                  ),
-                  Text(
-                    'Domain Reason: ${_domainLabel(_highestDomain.key, l10n)}',
-                  ),
-                  Text('Referral Type: ${_policy.referralTypeLabel}'),
-                  Text('Urgency: ${_policy.urgencyLabel}'),
-                  Text('Handled At: ${_policy.handledAt}'),
-                  Text('Follow-up By: ${_policy.followUpDays} days'),
-                ],
-              ),
-            ),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFFF3F7FB), Color(0xFFE9F1F8)],
           ),
-          if (_reviewEscalationReasons.isNotEmpty)
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
+        ),
+        child: SafeArea(
+          child: Row(
+            children: [
+              _buildSideNav(),
+              Expanded(
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Review Escalation Reasons',
-                      style: TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(height: 6),
-                    for (final reason in _reviewEscalationReasons)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
-                        child: Text('- $reason'),
+                    Container(
+                      height: headerHeight,
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Color(0xFF0D47A1), Color(0xFF1976D2)],
+                        ),
                       ),
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          Positioned(
+                            top: 0,
+                            right: 0,
+                            child: const LanguageMenuButton(iconColor: Colors.white),
+                          ),
+                          Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 64,
+                                height: 64,
+                                decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                                padding: const EdgeInsets.all(6),
+                                child: ClipOval(
+                                  child: Image.asset(
+                                    'assets/images/ap_logo.png',
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stack) => Center(
+                                      child: Text(
+                                        AppLocalizations.of(context).t('ap_short'),
+                                        style: const TextStyle(fontWeight: FontWeight.bold),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              Text(
+                                AppLocalizations.of(context).t('govt_andhra_pradesh'),
+                                style: const TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.w600),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                AppLocalizations.of(context).t('app_subtitle'),
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: isWide ? 26 : 22,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+                        child: Center(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 780),
+                            child: Card(
+                              elevation: 8,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                              child: Padding(
+                                padding: const EdgeInsets.all(18),
+                                child: Form(
+                                  key: _formKey,
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        l10n.t('create_referral'),
+                                        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        l10n.t('recommendation_engine_hint'),
+                                        style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                                      ),
+                                      if (_recommendedDomains.length > 1) ...[
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          l10n.t('multiple_referrals_notice'),
+                                          style: TextStyle(color: Colors.grey[700], fontSize: 12, fontWeight: FontWeight.w600),
+                                        ),
+                                      ],
+                                      const SizedBox(height: 14),
+                                      if (_referralDrafts.isEmpty)
+                                        Text(
+                                          l10n.t('no_high_critical_domains'),
+                                          style: TextStyle(color: Colors.grey[700], fontSize: 12, fontWeight: FontWeight.w600),
+                                        ),
+                                      for (int i = 0; i < _referralDrafts.length; i++) ...[
+                                        _buildDraftCard(_referralDrafts[i]),
+                                        if (i < _referralDrafts.length - 1) const SizedBox(height: 12),
+                                      ],
+                                      const SizedBox(height: 16),
+                                      SizedBox(
+                                        width: double.infinity,
+                                        child: ElevatedButton(
+                                          onPressed: submitting ? null : _createReferral,
+                                          style: ElevatedButton.styleFrom(
+                                            padding: const EdgeInsets.symmetric(vertical: 14),
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                          ),
+                                          child: Text(
+                                            submitting
+                                                ? l10n.t('submitting')
+                                                : (_referralDrafts.length > 1 ? l10n.t('create_referrals') : l10n.t('create_referral')),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
-            ),
-          if (!_canGenerateReferral)
-            Card(
-              color: const Color(0xFFFFF8E1),
-              child: const Padding(
-                padding: EdgeInsets.all(12),
-                child: Text('Referral is not required for low risk.'),
-              ),
-            ),
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: (_submitting || !_canGenerateReferral)
-                  ? null
-                  : _createReferral,
-              child: Text(
-                _submitting
-                    ? l10n.t('submitting')
-                    : l10n.t('generate_referral'),
-              ),
-            ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -486,29 +883,49 @@ class _ReferralScreenState extends State<ReferralScreen> {
 class _DomainRisk {
   final String key;
   final String risk;
+  final double? score;
   final int severity;
 
   const _DomainRisk({
     required this.key,
     required this.risk,
+    required this.score,
     required this.severity,
   });
 }
 
-class _ReferralPolicy {
-  final String referralTypeLabel;
-  final ReferralType type;
-  final ReferralUrgency urgency;
-  final String urgencyLabel;
-  final int followUpDays;
-  final String handledAt;
+class _ReferralRecommendation {
+  final _DomainRisk? domain;
+  final String referralType;
+  final String urgency;
+  final DateTime followUpDate;
 
-  const _ReferralPolicy({
-    required this.referralTypeLabel,
-    required this.type,
+  const _ReferralRecommendation({
+    required this.domain,
+    required this.referralType,
     required this.urgency,
-    required this.urgencyLabel,
-    required this.followUpDays,
-    required this.handledAt,
+    required this.followUpDate,
+  });
+}
+
+class _ReferralDraft {
+  final _DomainRisk? domain;
+  String referralType;
+  final String recommendedReferralType;
+  String urgency;
+  final String recommendedUrgency;
+  DateTime followUpDate;
+  final DateTime recommendedFollowUpDate;
+  final TextEditingController notesController;
+
+  _ReferralDraft({
+    required this.domain,
+    required this.referralType,
+    required this.recommendedReferralType,
+    required this.urgency,
+    required this.recommendedUrgency,
+    required this.followUpDate,
+    required this.recommendedFollowUpDate,
+    required this.notesController,
   });
 }
