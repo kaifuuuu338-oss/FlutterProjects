@@ -27,7 +27,7 @@ class ReferralApiService {
   }) async {
     try {
       final response = await _dio.post(
-        '/api/referral/create',
+        '/referral/create',
         data: {
           'child_id': childId,
           'risk_category': riskCategory,
@@ -48,7 +48,7 @@ class ReferralApiService {
   Future<Map<String, dynamic>> getActiveReferral(String childId) async {
     try {
       final response = await _dio.get(
-        '/api/referral/child/$childId',
+        '/referral/by-child/$childId',
       );
       return response.data as Map<String, dynamic>;
     } on DioException catch (e) {
@@ -63,7 +63,7 @@ class ReferralApiService {
   Future<Map<String, dynamic>> getReferral(int referralId) async {
     try {
       final response = await _dio.get(
-        '/api/referral/$referralId',
+        '/referral/$referralId',
       );
       return response.data as Map<String, dynamic>;
     } on DioException catch (e) {
@@ -80,8 +80,8 @@ class ReferralApiService {
     String? remarks,
   }) async {
     try {
-      final response = await _dio.put(
-        '/api/referral/$referralId/status',
+      final response = await _dio.post(
+        '/referral/$referralId/status',
         data: {
           'status': status,
           'appointment_date': appointmentDate,
@@ -102,7 +102,7 @@ class ReferralApiService {
   }) async {
     try {
       final response = await _dio.post(
-        '/api/referral/$referralId/escalate',
+        '/referral/$referralId/escalate',
         data: {
           'worker_id': workerId,
         },
@@ -122,7 +122,7 @@ class ReferralApiService {
   }) async {
     try {
       final response = await _dio.post(
-        '/api/referral/$referralId/override-facility',
+        '/referral/$referralId/override-facility',
         data: {
           'new_facility': newFacility,
           'override_reason': overrideReason,
@@ -139,7 +139,7 @@ class ReferralApiService {
   Future<Map<String, dynamic>> getStatusHistory(int referralId) async {
     try {
       final response = await _dio.get(
-        '/api/referral/$referralId/history',
+        '/referral/$referralId/history',
       );
       return response.data as Map<String, dynamic>;
     } on DioException catch (e) {

@@ -2,3 +2,9 @@
 my_first_app/backend/venv/
 
 my_first_app/backend/.venv/
+
+my_first_app/backend/app/ecd_data.db
+
+*.db
+
+*.sqlite3

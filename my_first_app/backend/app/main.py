@@ -1,15 +1,11 @@
 from __future__ import annotations
 
 import os
-import json
 import uuid
 import sqlite3
-import tempfile
 from collections import Counter
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import Dict, List, Optional
-import psycopg2
-from psycopg2.extras import RealDictCursor
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -25,21 +21,9 @@ try:
 except Exception:
     from intervention import generate_intervention, calculate_trend
 try:
-    from .problem_b_service import (
-        adjust_intensity,
-        generate_intervention_plan,
-        next_review_decision,
-        rule_logic_table,
-        schema_tables,
-    )
+    from .problem_b_service import ProblemBService
 except Exception:
-    from problem_b_service import (
-        adjust_intensity,
-        generate_intervention_plan,
-        next_review_decision,
-        rule_logic_table,
-        schema_tables,
-    )
+    from problem_b_service import ProblemBService
 try:
     from .problem_b_activity_engine import (
         assign_activities_for_child,
@@ -53,17 +37,16 @@ try:
         weekly_progress_rows,
     )
 except Exception:
-    from problem_b_activity_engine import (
-        assign_activities_for_child,
-        compute_compliance,
-        derive_severity,
-        determine_next_action,
-        escalation_decision,
-        plan_regeneration_summary,
-        projection_from_compliance,
-        reset_frequency_status,
-        weekly_progress_rows,
-    )
+    # Legacy module not required for problem_b_service - can be skipped
+    assign_activities_for_child = None
+    compute_compliance = None
+    derive_severity = None
+    determine_next_action = None
+    escalation_decision = None
+    plan_regeneration_summary = None
+    projection_from_compliance = None
+    reset_frequency_status = None
+    weekly_progress_rows = None
 
 
 class LoginRequest(BaseModel):
@@ -76,28 +59,13 @@ class LoginResponse(BaseModel):
     user_id: str
 
 
-class ChildRegisterRequest(BaseModel):
-    child_id: str
-    child_name: Optional[str] = None
-    gender: Optional[str] = None
-    age_months: int = 0
-    awc_id: Optional[str] = None
-    sector_id: Optional[str] = None
-    mandal_id: Optional[str] = None
-    district_id: Optional[str] = None
-    created_at: Optional[str] = None
-
-
-class ChildRegisterResponse(BaseModel):
-    child_id: str
-    status: str
-    created_at: str
-
-
 class ScreeningRequest(BaseModel):
     child_id: str
     age_months: int
     domain_responses: Dict[str, List[int]]
+    aww_id: Optional[str] = None
+    child_name: Optional[str] = None
+    village: Optional[str] = None
     # Optional context fields if frontend sends later
     gender: Optional[str] = None
     awc_id: Optional[str] = None
@@ -112,6 +80,8 @@ class ScreeningResponse(BaseModel):
     domain_scores: Dict[str, str]
     explanation: List[str]
     delay_summary: Dict[str, int]
+    referral_created: bool = False
+    referral_data: Optional[Dict[str, str]] = None
 
 
 class ReferralRequest(BaseModel):
@@ -133,6 +103,25 @@ class ReferralResponse(BaseModel):
     created_at: str
 
 
+class ReferralStatusUpdateRequest(BaseModel):
+    status: str
+    appointment_date: Optional[str] = None
+    completion_date: Optional[str] = None
+    worker_id: Optional[str] = None
+
+
+class ReferralStatusUpdateByIdRequest(BaseModel):
+    referral_id: str
+    status: str
+    appointment_date: Optional[str] = None
+    completion_date: Optional[str] = None
+    worker_id: Optional[str] = None
+
+
+class ReferralEscalateRequest(BaseModel):
+    worker_id: Optional[str] = None
+
+
 def _get_conn(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -145,8 +134,10 @@ def _init_db(db_path: str) -> None:
             """
             CREATE TABLE IF NOT EXISTS child_profile (
               child_id TEXT PRIMARY KEY,
+              child_name TEXT,
               gender TEXT,
               age_months INTEGER,
+              village TEXT,
               awc_id TEXT,
               sector_id TEXT,
               mandal_id TEXT,
@@ -184,6 +175,15 @@ def _init_db(db_path: str) -> None:
               completion_date TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS referral_status_history (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              referral_id TEXT,
+              old_status TEXT,
+              new_status TEXT,
+              changed_on TEXT,
+              worker_id TEXT
+            );
+
             CREATE TABLE IF NOT EXISTS followup_outcome (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               child_id TEXT,
@@ -194,42 +194,44 @@ def _init_db(db_path: str) -> None:
               followup_date TEXT
             );
 
-            CREATE TABLE IF NOT EXISTS app_state (
-              state_key TEXT PRIMARY KEY,
-              payload_json TEXT NOT NULL,
-              updated_at TEXT NOT NULL
+            CREATE TABLE IF NOT EXISTS follow_up_activities (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              referral_id TEXT,
+              target_user TEXT,
+              domain TEXT,
+              activity_title TEXT,
+              activity_description TEXT,
+              frequency TEXT,
+              duration_days INTEGER,
+              created_on TEXT
             );
 
-            CREATE TABLE IF NOT EXISTS intervention_history (
+            CREATE TABLE IF NOT EXISTS follow_up_log (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
-              child_id TEXT NOT NULL,
-              source TEXT NOT NULL,
-              request_json TEXT NOT NULL,
-              response_json TEXT NOT NULL,
-              created_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS followup_assessment (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              child_id TEXT NOT NULL,
-              baseline_delay INTEGER NOT NULL,
-              followup_delay INTEGER NOT NULL,
-              delay_reduction INTEGER NOT NULL,
-              trend TEXT NOT NULL,
-              created_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS caregiver_engagement_log (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              child_id TEXT NOT NULL,
-              mode TEXT NOT NULL,
-              contact_json TEXT,
-              status TEXT NOT NULL,
-              note TEXT NOT NULL,
-              created_at TEXT NOT NULL
+              referral_id TEXT,
+              activity_id INTEGER,
+              completed INTEGER DEFAULT 0,
+              completed_on TEXT,
+              remarks TEXT
             );
             """
         )
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(referral_action)").fetchall()]
+        if "appointment_date" not in cols:
+            conn.execute("ALTER TABLE referral_action ADD COLUMN appointment_date TEXT")
+        if "followup_deadline" not in cols:
+            conn.execute("ALTER TABLE referral_action ADD COLUMN followup_deadline TEXT")
+        if "escalation_level" not in cols:
+            conn.execute("ALTER TABLE referral_action ADD COLUMN escalation_level INTEGER")
+        if "escalated_to" not in cols:
+            conn.execute("ALTER TABLE referral_action ADD COLUMN escalated_to TEXT")
+        if "last_updated" not in cols:
+            conn.execute("ALTER TABLE referral_action ADD COLUMN last_updated TEXT")
+        child_cols = [r["name"] for r in conn.execute("PRAGMA table_info(child_profile)").fetchall()]
+        if "child_name" not in child_cols:
+            conn.execute("ALTER TABLE child_profile ADD COLUMN child_name TEXT")
+        if "village" not in child_cols:
+            conn.execute("ALTER TABLE child_profile ADD COLUMN village TEXT")
 
 
 def _risk_rank(label: str) -> int:
@@ -282,225 +284,18 @@ def _parse_date_safe(value: str | None) -> date | None:
             return None
 
 
-def _pg_connect(pg_dsn: str):
-    return psycopg2.connect(pg_dsn, cursor_factory=RealDictCursor)
-
-
-def _init_pg_db(pg_dsn: str) -> None:
-    with _pg_connect(pg_dsn) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS child_profile (
-                  child_id TEXT PRIMARY KEY,
-                  gender TEXT,
-                  age_months INTEGER,
-                  awc_id TEXT,
-                  sector_id TEXT,
-                  mandal_id TEXT,
-                  district_id TEXT,
-                  created_at TEXT
-                );
-                """
-            )
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS screening_event (
-                  id SERIAL PRIMARY KEY,
-                  child_id TEXT,
-                  age_months INTEGER,
-                  overall_risk TEXT,
-                  explainability TEXT,
-                  assessment_cycle TEXT,
-                  created_at TEXT
-                );
-                """
-            )
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS screening_domain_score (
-                  id SERIAL PRIMARY KEY,
-                  screening_id INTEGER,
-                  domain TEXT,
-                  risk_label TEXT,
-                  score DOUBLE PRECISION
-                );
-                """
-            )
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS referral_action (
-                  referral_id TEXT PRIMARY KEY,
-                  child_id TEXT,
-                  aww_id TEXT,
-                  referral_required INTEGER,
-                  referral_type TEXT,
-                  urgency TEXT,
-                  referral_status TEXT,
-                  referral_date TEXT,
-                  completion_date TEXT
-                );
-                """
-            )
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS followup_outcome (
-                  id SERIAL PRIMARY KEY,
-                  child_id TEXT,
-                  baseline_delay_months INTEGER,
-                  followup_delay_months INTEGER,
-                  improvement_status TEXT,
-                  followup_completed INTEGER,
-                  followup_date TEXT
-                );
-                """
-            )
-        conn.commit()
-
-
-def _upsert_child_profile_pg(pg_dsn: str, payload: ChildRegisterRequest) -> ChildRegisterResponse:
-    created_at = payload.created_at or datetime.utcnow().isoformat()
-    with _pg_connect(pg_dsn) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO child_profile(child_id, gender, age_months, awc_id, sector_id, mandal_id, district_id, created_at)
-                VALUES(%s,%s,%s,%s,%s,%s,%s,%s)
-                ON CONFLICT(child_id) DO UPDATE SET
-                  gender=COALESCE(NULLIF(EXCLUDED.gender, ''), child_profile.gender),
-                  age_months=EXCLUDED.age_months,
-                  awc_id=COALESCE(NULLIF(EXCLUDED.awc_id, ''), child_profile.awc_id),
-                  sector_id=COALESCE(NULLIF(EXCLUDED.sector_id, ''), child_profile.sector_id),
-                  mandal_id=COALESCE(NULLIF(EXCLUDED.mandal_id, ''), child_profile.mandal_id),
-                  district_id=COALESCE(NULLIF(EXCLUDED.district_id, ''), child_profile.district_id)
-                """,
-                (
-                    payload.child_id,
-                    payload.gender or "",
-                    int(payload.age_months or 0),
-                    payload.awc_id or "",
-                    payload.sector_id or "",
-                    payload.mandal_id or "",
-                    payload.district_id or "",
-                    created_at,
-                ),
-            )
-        conn.commit()
-    return ChildRegisterResponse(child_id=payload.child_id, status="synced", created_at=created_at)
-
-
-def _save_screening_pg(pg_dsn: str, payload: ScreeningRequest, result: ScreeningResponse) -> None:
-    created_at = datetime.utcnow().isoformat()
-    with _pg_connect(pg_dsn) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO child_profile(child_id, gender, age_months, awc_id, sector_id, mandal_id, district_id, created_at)
-                VALUES(%s,%s,%s,%s,%s,%s,%s,%s)
-                ON CONFLICT(child_id) DO UPDATE SET
-                  gender=COALESCE(NULLIF(EXCLUDED.gender, ''), child_profile.gender),
-                  age_months=EXCLUDED.age_months,
-                  awc_id=COALESCE(NULLIF(EXCLUDED.awc_id, ''), child_profile.awc_id),
-                  sector_id=COALESCE(NULLIF(EXCLUDED.sector_id, ''), child_profile.sector_id),
-                  mandal_id=COALESCE(NULLIF(EXCLUDED.mandal_id, ''), child_profile.mandal_id),
-                  district_id=COALESCE(NULLIF(EXCLUDED.district_id, ''), child_profile.district_id)
-                """,
-                (
-                    payload.child_id,
-                    payload.gender or "",
-                    payload.age_months,
-                    payload.awc_id or "",
-                    payload.sector_id or "",
-                    payload.mandal or "",
-                    payload.district or "",
-                    created_at,
-                ),
-            )
-            cur.execute(
-                """
-                INSERT INTO screening_event(child_id, age_months, overall_risk, explainability, assessment_cycle, created_at)
-                VALUES(%s,%s,%s,%s,%s,%s)
-                RETURNING id
-                """,
-                (
-                    payload.child_id,
-                    payload.age_months,
-                    _normalize_risk(result.risk_level),
-                    "; ".join(result.explanation),
-                    payload.assessment_cycle or "Baseline",
-                    created_at,
-                ),
-            )
-            screening_id = int(cur.fetchone()["id"])
-            for domain, risk in result.domain_scores.items():
-                cur.execute(
-                    """
-                    INSERT INTO screening_domain_score(screening_id, domain, risk_label, score)
-                    VALUES(%s,%s,%s,%s)
-                    """,
-                    (screening_id, domain, _normalize_risk(risk), _risk_score(risk)),
-                )
-            delay_months = int((result.delay_summary or {}).get("num_delays", 0)) * 2
-            cur.execute(
-                """
-                SELECT id FROM followup_outcome
-                WHERE child_id=%s
-                ORDER BY id DESC
-                LIMIT 1
-                """,
-                (payload.child_id,),
-            )
-            existing = cur.fetchone()
-            if existing is None:
-                cur.execute(
-                    """
-                    INSERT INTO followup_outcome(child_id, baseline_delay_months, followup_delay_months, improvement_status, followup_completed, followup_date)
-                    VALUES(%s,%s,%s,%s,%s,%s)
-                    """,
-                    (
-                        payload.child_id,
-                        delay_months,
-                        delay_months,
-                        "No Change",
-                        0,
-                        datetime.utcnow().date().isoformat(),
-                    ),
-                )
-        conn.commit()
-
-
-def _create_referral_pg(pg_dsn: str, payload: ReferralRequest, referral_id: str) -> None:
-    with _pg_connect(pg_dsn) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO referral_action(referral_id, child_id, aww_id, referral_required, referral_type, urgency, referral_status, referral_date, completion_date)
-                VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                """,
-                (
-                    referral_id,
-                    payload.child_id,
-                    payload.aww_id,
-                    1,
-                    payload.referral_type,
-                    payload.urgency,
-                    "Pending",
-                    datetime.utcnow().date().isoformat(),
-                    None,
-                ),
-            )
-        conn.commit()
-
 def _save_screening(db_path: str, payload: ScreeningRequest, result: ScreeningResponse) -> None:
     created_at = datetime.utcnow().isoformat()
     with _get_conn(db_path) as conn:
         conn.execute(
             """
-            INSERT INTO child_profile(child_id, gender, age_months, awc_id, sector_id, mandal_id, district_id, created_at)
-            VALUES(?,?,?,?,?,?,?,?)
+            INSERT INTO child_profile(child_id, child_name, gender, age_months, village, awc_id, sector_id, mandal_id, district_id, created_at)
+            VALUES(?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(child_id) DO UPDATE SET
+              child_name=COALESCE(NULLIF(excluded.child_name, ''), child_profile.child_name),
               gender=COALESCE(NULLIF(excluded.gender, ''), child_profile.gender),
               age_months=excluded.age_months,
+              village=COALESCE(NULLIF(excluded.village, ''), child_profile.village),
               awc_id=COALESCE(NULLIF(excluded.awc_id, ''), child_profile.awc_id),
               sector_id=COALESCE(NULLIF(excluded.sector_id, ''), child_profile.sector_id),
               mandal_id=COALESCE(NULLIF(excluded.mandal_id, ''), child_profile.mandal_id),
@@ -508,8 +303,10 @@ def _save_screening(db_path: str, payload: ScreeningRequest, result: ScreeningRe
             """,
             (
                 payload.child_id,
+                payload.child_name or "",
                 payload.gender or "",
                 payload.age_months,
+                payload.village or "",
                 payload.awc_id or "",
                 payload.sector_id or "",
                 payload.mandal or "",
@@ -569,71 +366,200 @@ def _save_screening(db_path: str, payload: ScreeningRequest, result: ScreeningRe
             )
 
 
-def _upsert_child_profile(db_path: str, payload: ChildRegisterRequest) -> ChildRegisterResponse:
-    created_at = payload.created_at or datetime.utcnow().isoformat()
-    with _get_conn(db_path) as conn:
-        conn.execute(
-            """
-            INSERT INTO child_profile(child_id, gender, age_months, awc_id, sector_id, mandal_id, district_id, created_at)
-            VALUES(?,?,?,?,?,?,?,?)
-            ON CONFLICT(child_id) DO UPDATE SET
-              gender=COALESCE(NULLIF(excluded.gender, ''), child_profile.gender),
-              age_months=excluded.age_months,
-              awc_id=COALESCE(NULLIF(excluded.awc_id, ''), child_profile.awc_id),
-              sector_id=COALESCE(NULLIF(excluded.sector_id, ''), child_profile.sector_id),
-              mandal_id=COALESCE(NULLIF(excluded.mandal_id, ''), child_profile.mandal_id),
-              district_id=COALESCE(NULLIF(excluded.district_id, ''), child_profile.district_id)
-            """,
-            (
-                payload.child_id,
-                payload.gender or "",
-                int(payload.age_months or 0),
-                payload.awc_id or "",
-                payload.sector_id or "",
-                payload.mandal_id or "",
-                payload.district_id or "",
-                created_at,
-            ),
-        )
-    return ChildRegisterResponse(
-        child_id=payload.child_id,
-        status="synced",
-        created_at=created_at,
+def _risk_to_referral_policy(risk_level: str) -> Dict[str, str] | None:
+    risk = _normalize_risk(risk_level)
+    if risk == "Critical":
+        return {
+            "referral_type": "PHC",
+            "referral_type_label": "Immediate Specialist Referral",
+            "urgency": "Immediate",
+            "followup_days": "2",
+            "facility": "District Specialist",
+        }
+    if risk == "High":
+        return {
+            "referral_type": "PHC",
+            "referral_type_label": "Specialist Evaluation",
+            "urgency": "Priority",
+            "followup_days": "10",
+            "facility": "Block Specialist",
+        }
+    # Strict Problem B mapping: no referral for Medium/Low.
+    return None
+
+
+def _build_domain_reason(domain_scores: Dict[str, str]) -> str:
+    if not domain_scores:
+        return "General developmental risk"
+    severity = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+    best_domain = None
+    best_risk = "low"
+    best_score = -1
+    for domain, risk in domain_scores.items():
+        score = severity.get(str(risk).strip().lower(), 0)
+        if score > best_score:
+            best_score = score
+            best_domain = domain
+            best_risk = str(risk)
+    if best_domain is None:
+        return "General developmental risk"
+    return f"{best_domain} ({_normalize_risk(best_risk)})"
+
+
+def _domain_display(domain: str) -> str:
+    mapping = {
+        "GM": "Gross Motor",
+        "FM": "Fine Motor",
+        "LC": "Speech & Language",
+        "COG": "Cognitive",
+        "SE": "Social-Emotional",
+    }
+    return mapping.get(str(domain).strip().upper(), str(domain))
+
+
+def _risk_points(label: str) -> int:
+    normalized = _normalize_risk(label)
+    return {"Low": 1, "Medium": 2, "High": 3, "Critical": 4}.get(normalized, 1)
+
+
+def _status_to_frontend(status: str) -> str:
+    normalized = str(status or "").strip().lower()
+    if normalized in {"pending"}:
+        return "PENDING"
+    if normalized in {"appointment scheduled", "scheduled"}:
+        return "SCHEDULED"
+    if normalized in {"under treatment", "visited"}:
+        return "VISITED"
+    if normalized in {"completed"}:
+        return "COMPLETED"
+    if normalized in {"missed"}:
+        return "MISSED"
+    return "PENDING"
+
+
+def _status_to_db(status: str) -> str:
+    normalized = str(status or "").strip().upper()
+    if normalized == "PENDING":
+        return "Pending"
+    if normalized == "SCHEDULED":
+        return "Appointment Scheduled"
+    if normalized == "VISITED":
+        return "Under Treatment"
+    if normalized == "COMPLETED":
+        return "Completed"
+    if normalized == "MISSED":
+        return "Missed"
+    raise HTTPException(status_code=400, detail="Invalid referral status")
+
+
+def _today_iso() -> str:
+    return datetime.utcnow().date().isoformat()
+
+
+def _escalation_target(level: int) -> str:
+    if level <= 0:
+        return "Block Medical Officer"
+    if level == 1:
+        return "Block Medical Officer"
+    if level == 2:
+        return "District Health Officer"
+    return "State Supervisor"
+
+
+def _apply_overdue_escalation(
+    conn: sqlite3.Connection,
+    *,
+    referral_id: str,
+    status: str,
+    followup_deadline: str | None,
+    escalation_level: int | None,
+) -> None:
+    if not followup_deadline:
+        return
+    normalized = _status_to_frontend(status)
+    if normalized == "COMPLETED":
+        return
+    deadline = _parse_date_safe(followup_deadline)
+    if deadline is None:
+        return
+    today = datetime.utcnow().date()
+    if today <= deadline:
+        return
+    level = int(escalation_level or 0) + 1
+    new_deadline = today + timedelta(days=2)
+    conn.execute(
+        """
+        UPDATE referral_action
+        SET escalation_level = ?,
+            followup_deadline = ?,
+            last_updated = ?
+        WHERE referral_id = ?
+        """,
+        (level, new_deadline.isoformat(), today.isoformat(), referral_id),
     )
 
 
-def _state_key(kind: str, entity_id: str) -> str:
-    return f"{kind}:{entity_id}"
-
-
-def _save_state(db_path: str, kind: str, entity_id: str, payload: dict | list) -> None:
-    key = _state_key(kind, entity_id)
+def _create_referral_action(
+    db_path: str,
+    *,
+    child_id: str,
+    aww_id: str,
+    risk_level: str,
+    domain_scores: Dict[str, str],
+) -> Dict[str, str] | None:
+    policy = _risk_to_referral_policy(risk_level)
+    if policy is None:
+        return None
+    referral_id = f"ref_{uuid.uuid4().hex[:12]}"
+    created_on = datetime.utcnow().date()
+    followup_by = created_on + timedelta(days=int(policy["followup_days"]))
     with _get_conn(db_path) as conn:
         conn.execute(
             """
-            INSERT INTO app_state(state_key, payload_json, updated_at)
-            VALUES(?,?,?)
-            ON CONFLICT(state_key) DO UPDATE SET
-              payload_json=excluded.payload_json,
-              updated_at=excluded.updated_at
+            INSERT INTO referral_action(
+                referral_id,
+                child_id,
+                aww_id,
+                referral_required,
+                referral_type,
+                urgency,
+                referral_status,
+                referral_date,
+                completion_date,
+                followup_deadline,
+                escalation_level,
+                escalated_to,
+                last_updated
+            )
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
-            (key, json.dumps(payload), datetime.utcnow().isoformat()),
+            (
+                referral_id,
+                child_id,
+                aww_id,
+                1,
+                policy["referral_type"],
+                policy["urgency"],
+                "Pending",
+                created_on.isoformat(),
+                None,
+                followup_by.isoformat(),
+                0,
+                None,
+                created_on.isoformat(),
+            ),
         )
-
-
-def _load_state(db_path: str, kind: str, entity_id: str, default):
-    key = _state_key(kind, entity_id)
-    with _get_conn(db_path) as conn:
-        row = conn.execute(
-            "SELECT payload_json FROM app_state WHERE state_key=?",
-            (key,),
-        ).fetchone()
-    if row is None:
-        return default
-    try:
-        return json.loads(row["payload_json"])
-    except Exception:
-        return default
+    return {
+        "referral_id": referral_id,
+        "risk_level": _normalize_risk(risk_level),
+        "referral_type": policy["referral_type"],
+        "referral_type_label": policy["referral_type_label"],
+        "urgency": policy["urgency"],
+        "status": "Pending",
+        "created_on": created_on.isoformat(),
+        "followup_by": followup_by.isoformat(),
+        "domain_reason": _build_domain_reason(domain_scores),
+    }
 
 
 def _compute_monitoring(db_path: str, role: str, location_id: str) -> dict:
@@ -642,12 +568,7 @@ def _compute_monitoring(db_path: str, role: str, location_id: str) -> dict:
     with _get_conn(db_path) as conn:
         children = conn.execute("SELECT * FROM child_profile").fetchall()
         if filter_column and location_id:
-            q = str(location_id).strip().upper()
-            children = [
-                c
-                for c in children
-                if str(c[filter_column] or "").strip().upper() == q
-            ]
+            children = [c for c in children if (c[filter_column] or "") == location_id]
         child_ids = [c["child_id"] for c in children]
         child_map = {c["child_id"]: dict(c) for c in children}
 
@@ -1014,134 +935,146 @@ def _compute_impact(db_path: str, role: str, location_id: str) -> dict:
     }
 
 
-def _refresh_pg_mirror_sqlite(pg_dsn: str) -> str:
-    """
-    Build a temporary SQLite mirror from PostgreSQL for analytics functions.
-    This keeps existing monitoring/impact logic unchanged while PostgreSQL is source-of-truth.
-    """
-    mirror_path = os.path.join(tempfile.gettempdir(), "ecd_pg_mirror.db")
-    _init_db(mirror_path)
+def _generate_follow_up_activities(db_path: str, referral_id: str, child_id: str, risk_level: str, domain_scores: Dict[str, str], autism_risk: str = "Low", nutrition_risk: str = "Low") -> List[Dict]:
+    """Generate domain-specific home activities based on referral risk profile."""
+    activities = []
+    activity_id = 1
 
-    with _get_conn(mirror_path) as sqlite_conn:
-        sqlite_conn.execute("DELETE FROM screening_domain_score")
-        sqlite_conn.execute("DELETE FROM screening_event")
-        sqlite_conn.execute("DELETE FROM referral_action")
-        sqlite_conn.execute("DELETE FROM followup_outcome")
-        sqlite_conn.execute("DELETE FROM child_profile")
+    # Extract delay information from domain scores
+    delayed_domains = []
+    for domain, risk in domain_scores.items():
+        domain_upper = str(domain).upper().strip()
+        if domain_upper in {"GM", "FM", "LC", "COG", "SE"}:
+            risk_normalized = _normalize_risk(str(risk))
+            if risk_normalized in {"High", "Critical", "Medium"}:
+                delayed_domains.append(domain_upper)
 
-        with _pg_connect(pg_dsn) as pg_conn:
-            with pg_conn.cursor() as cur:
-                cur.execute("SELECT child_id, gender, age_months, awc_id, sector_id, mandal_id, district_id, created_at FROM child_profile")
-                for r in cur.fetchall():
-                    sqlite_conn.execute(
-                        """
-                        INSERT INTO child_profile(child_id, gender, age_months, awc_id, sector_id, mandal_id, district_id, created_at)
-                        VALUES(?,?,?,?,?,?,?,?)
-                        """,
-                        (
-                            r.get("child_id"),
-                            r.get("gender"),
-                            int(r.get("age_months") or 0),
-                            r.get("awc_id") or "",
-                            r.get("sector_id") or "",
-                            r.get("mandal_id") or "",
-                            r.get("district_id") or "",
-                            r.get("created_at") or "",
-                        ),
-                    )
+    # Rule 1: Gross Motor Delay → Daily floor play activities
+    if "GM" in delayed_domains:
+        activities.append({
+            "id": activity_id,
+            "referral_id": referral_id,
+            "target_user": "CAREGIVER",
+            "domain": "GM",
+            "activity_title": "Daily Floor Play & Standing Support",
+            "activity_description": "Encourage crawling and standing with support. Let child practice weight-shifting. 20-30 mins daily.",
+            "frequency": "DAILY",
+            "duration_days": 30,
+            "created_on": datetime.utcnow().date().isoformat(),
+        })
+        activity_id += 1
 
-                cur.execute("SELECT id, child_id, age_months, overall_risk, explainability, assessment_cycle, created_at FROM screening_event")
-                for r in cur.fetchall():
-                    sqlite_conn.execute(
-                        """
-                        INSERT INTO screening_event(id, child_id, age_months, overall_risk, explainability, assessment_cycle, created_at)
-                        VALUES(?,?,?,?,?,?,?)
-                        """,
-                        (
-                            int(r.get("id") or 0),
-                            r.get("child_id"),
-                            int(r.get("age_months") or 0),
-                            r.get("overall_risk") or "",
-                            r.get("explainability") or "",
-                            r.get("assessment_cycle") or "Baseline",
-                            r.get("created_at") or "",
-                        ),
-                    )
+        # Add AWW monitoring activity
+        activities.append({
+            "id": activity_id,
+            "referral_id": referral_id,
+            "target_user": "AWW",
+            "domain": "GM",
+            "activity_title": "Weekly Motor Development Check",
+            "activity_description": "Observe and assess child's motor milestones. Document progress. Counsel caregiver.",
+            "frequency": "WEEKLY",
+            "duration_days": 30,
+            "created_on": datetime.utcnow().date().isoformat(),
+        })
+        activity_id += 1
 
-                cur.execute("SELECT id, screening_id, domain, risk_label, score FROM screening_domain_score")
-                for r in cur.fetchall():
-                    sqlite_conn.execute(
-                        """
-                        INSERT INTO screening_domain_score(id, screening_id, domain, risk_label, score)
-                        VALUES(?,?,?,?,?)
-                        """,
-                        (
-                            int(r.get("id") or 0),
-                            int(r.get("screening_id") or 0),
-                            r.get("domain") or "",
-                            r.get("risk_label") or "",
-                            float(r.get("score") or 0.0),
-                        ),
-                    )
+    # Rule 2: Fine Motor Delay → Hand activities
+    if "FM" in delayed_domains:
+        activities.append({
+            "id": activity_id,
+            "referral_id": referral_id,
+            "target_user": "CAREGIVER",
+            "domain": "FM",
+            "activity_title": "Hand & Finger Exercises",
+            "activity_description": "Practice grasping, finger play, and self-feeding. Use household items (spoons, balls). 15 mins daily.",
+            "frequency": "DAILY",
+            "duration_days": 30,
+            "created_on": datetime.utcnow().date().isoformat(),
+        })
+        activity_id += 1
 
-                cur.execute(
-                    """
-                    SELECT referral_id, child_id, aww_id, referral_required, referral_type, urgency, referral_status, referral_date, completion_date
-                    FROM referral_action
-                    """
-                )
-                for r in cur.fetchall():
-                    sqlite_conn.execute(
-                        """
-                        INSERT INTO referral_action(referral_id, child_id, aww_id, referral_required, referral_type, urgency, referral_status, referral_date, completion_date)
-                        VALUES(?,?,?,?,?,?,?,?,?)
-                        """,
-                        (
-                            r.get("referral_id"),
-                            r.get("child_id"),
-                            r.get("aww_id"),
-                            int(r.get("referral_required") or 0),
-                            r.get("referral_type") or "",
-                            r.get("urgency") or "",
-                            r.get("referral_status") or "",
-                            r.get("referral_date") or "",
-                            r.get("completion_date"),
-                        ),
-                    )
+    # Rule 3: Language & Communication Delay → Speech activities
+    if "LC" in delayed_domains:
+        activities.append({
+            "id": activity_id,
+            "referral_id": referral_id,
+            "target_user": "CAREGIVER",
+            "domain": "LC",
+            "activity_title": "Language Stimulation Activities",
+            "activity_description": "Talk to child, name objects, sing songs. Encourage babbling and word repetition. 20 mins daily.",
+            "frequency": "DAILY",
+            "duration_days": 30,
+            "created_on": datetime.utcnow().date().isoformat(),
+        })
+        activity_id += 1
 
-                cur.execute(
-                    """
-                    SELECT id, child_id, baseline_delay_months, followup_delay_months, improvement_status, followup_completed, followup_date
-                    FROM followup_outcome
-                    """
-                )
-                for r in cur.fetchall():
-                    sqlite_conn.execute(
-                        """
-                        INSERT INTO followup_outcome(id, child_id, baseline_delay_months, followup_delay_months, improvement_status, followup_completed, followup_date)
-                        VALUES(?,?,?,?,?,?,?)
-                        """,
-                        (
-                            int(r.get("id") or 0),
-                            r.get("child_id"),
-                            int(r.get("baseline_delay_months") or 0),
-                            int(r.get("followup_delay_months") or 0),
-                            r.get("improvement_status") or "No Change",
-                            int(r.get("followup_completed") or 0),
-                            r.get("followup_date") or "",
-                        ),
-                    )
-    return mirror_path
+    # Rule 4: Cognitive Delay → Problem-solving activities
+    if "COG" in delayed_domains:
+        activities.append({
+            "id": activity_id,
+            "referral_id": referral_id,
+            "target_user": "CAREGIVER",
+            "domain": "COG",
+            "activity_title": "Cognitive Play & Problem Solving",
+            "activity_description": "Hide-and-seek games, shape sorting, stacking toys. Encourage exploration and discovery. 20 mins daily.",
+            "frequency": "DAILY",
+            "duration_days": 30,
+            "created_on": datetime.utcnow().date().isoformat(),
+        })
+        activity_id += 1
 
+    # Rule 5: Social-Emotional Delay → Interaction activities
+    if "SE" in delayed_domains or autism_risk in {"Moderate", "High"}:
+        activities.append({
+            "id": activity_id,
+            "referral_id": referral_id,
+            "target_user": "CAREGIVER",
+            "domain": "SE",
+            "activity_title": "Social Interaction & Eye Contact Practice",
+            "activity_description": "Call child's name, maintain eye contact during play. Practice greeting gestures. 10-15 mins, 3x daily.",
+            "frequency": "DAILY",
+            "duration_days": 30,
+            "created_on": datetime.utcnow().date().isoformat(),
+        })
+        activity_id += 1
 
-def _compute_monitoring_postgres(pg_dsn: str, role: str, location_id: str) -> dict:
-    mirror_path = _refresh_pg_mirror_sqlite(pg_dsn)
-    return _compute_monitoring(mirror_path, role, location_id)
+    # Rule 6: Nutrition Risk → Feeding guidance
+    if nutrition_risk in {"High", "Severe", "Critical"}:
+        activities.append({
+            "id": activity_id,
+            "referral_id": referral_id,
+            "target_user": "AWW",
+            "domain": "Nutrition",
+            "activity_title": "Weekly Weight Monitoring & Nutrition Counseling",
+            "activity_description": "Check child's weight weekly. Monitor growth. Counsel caregiver on nutrition, fortified foods, supplementation.",
+            "frequency": "WEEKLY",
+            "duration_days": 30,
+            "created_on": datetime.utcnow().date().isoformat(),
+        })
+        activity_id += 1
 
-
-def _compute_impact_postgres(pg_dsn: str, role: str, location_id: str) -> dict:
-    mirror_path = _refresh_pg_mirror_sqlite(pg_dsn)
-    return _compute_impact(mirror_path, role, location_id)
+    # Save activities to database
+    with _get_conn(db_path) as conn:
+        for activity in activities:
+            conn.execute(
+                """
+                INSERT INTO follow_up_activities (
+                    referral_id, target_user, domain, activity_title,
+                    activity_description, frequency, duration_days, created_on
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    activity["referral_id"],
+                    activity["target_user"],
+                    activity["domain"],
+                    activity["activity_title"],
+                    activity["activity_description"],
+                    activity["frequency"],
+                    activity["duration_days"],
+                    activity["created_on"],
+                ),
+            )
+    return activities
 
 
 def create_app() -> FastAPI:
@@ -1177,13 +1110,36 @@ def create_app() -> FastAPI:
         "ECD_DATA_DB",
         os.path.abspath(os.path.join(os.path.dirname(__file__), "ecd_data.db")),
     )
-    postgres_dsn = os.getenv("ECD_POSTGRES_DSN", "").strip()
     _init_db(db_path)
-    if postgres_dsn:
-        _init_pg_db(postgres_dsn)
+    # Simple in-memory store for tasks/checklists (child_id -> data)
+    tasks_store: Dict[str, Dict] = {}
+    # In-memory activity assignment + tracking store for Problem B engine
+    activity_tracking_store: Dict[str, List[Dict]] = {}
+    activity_plan_summary_store: Dict[str, Dict] = {}
+    # In-memory referral appointments (referral_id -> list of appointments)
+    appointments_store: Dict[str, List[Dict]] = {}
+    # In-memory referral status override (referral_id -> status)
+    referral_status_store: Dict[str, str] = {}
+
+    def _suggested_referral_status(referral_id: str) -> str:
+        appointments = appointments_store.get(referral_id, [])
+        if not appointments:
+            return "Pending"
+        completed = sum(1 for a in appointments if a.get("status") == "COMPLETED")
+        if completed == 0:
+            return "Appointment Scheduled"
+        if completed >= 1 and len(appointments) == 1:
+            return "Completed"
+        if len(appointments) > 1:
+            return "Under Treatment"
+        return "Appointment Scheduled"
+
+    def _current_referral_status(referral_id: str) -> str:
+        return referral_status_store.get(referral_id, _suggested_referral_status(referral_id))
+
     def _phase_payload(child_id: str) -> Dict:
-        rows = _load_state(db_path, "pb_activity_rows", child_id, [])
-        summary = _load_state(db_path, "pb_activity_summary", child_id, {
+        rows = activity_tracking_store.get(child_id, [])
+        summary = activity_plan_summary_store.get(child_id, {
             "child_id": child_id,
             "domains": [],
             "total_activities": 0,
@@ -1222,15 +1178,6 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="Password is required")
         token = f"demo_jwt_{uuid.uuid4().hex}"
         return LoginResponse(token=token, user_id=f"aww_{payload.mobile_number}")
-
-    @app.post("/children/register", response_model=ChildRegisterResponse)
-    def register_child(payload: ChildRegisterRequest) -> ChildRegisterResponse:
-        if not payload.child_id.strip():
-            raise HTTPException(status_code=400, detail="child_id is required")
-        response = _upsert_child_profile(db_path, payload)
-        if postgres_dsn:
-            _upsert_child_profile_pg(postgres_dsn, payload)
-        return response
 
     @app.post("/screening/submit", response_model=ScreeningResponse)
     def submit_screening(payload: ScreeningRequest) -> ScreeningResponse:
@@ -1273,11 +1220,20 @@ def create_app() -> FastAPI:
                 "delay_summary": delay_summary,
             }
         else:
-            result = predict_risk(payload.dict(), artifacts)
+            result = predict_risk(payload.model_dump(), artifacts)
+        risk_level = str(result.get("risk_level", "low"))
+        domain_scores = dict(result.get("domain_scores") or {})
+        referral_data = _create_referral_action(
+            db_path,
+            child_id=payload.child_id,
+            aww_id=(payload.aww_id or payload.awc_id or "").strip() or "unknown_aww",
+            risk_level=risk_level,
+            domain_scores=domain_scores,
+        )
+        result["referral_created"] = referral_data is not None
+        result["referral_data"] = referral_data
         response = ScreeningResponse(**result)
         _save_screening(db_path, payload, response)
-        if postgres_dsn:
-            _save_screening_pg(postgres_dsn, payload, response)
         return response
 
     @app.post("/referral/create", response_model=ReferralResponse)
@@ -1285,6 +1241,9 @@ def create_app() -> FastAPI:
         if payload.referral_type not in {"PHC", "RBSK"}:
             raise HTTPException(status_code=400, detail="Referral type must be PHC or RBSK")
         referral_id = f"ref_{uuid.uuid4().hex[:12]}"
+        created_on = datetime.utcnow().date()
+        followup_days = 2 if _normalize_risk(payload.overall_risk) == "Critical" else 10
+        followup_by = created_on + timedelta(days=followup_days)
         response = ReferralResponse(
             referral_id=referral_id,
             status="Pending",
@@ -1293,8 +1252,22 @@ def create_app() -> FastAPI:
         with _get_conn(db_path) as conn:
             conn.execute(
                 """
-                INSERT INTO referral_action(referral_id, child_id, aww_id, referral_required, referral_type, urgency, referral_status, referral_date, completion_date)
-                VALUES(?,?,?,?,?,?,?,?,?)
+                INSERT INTO referral_action(
+                    referral_id,
+                    child_id,
+                    aww_id,
+                    referral_required,
+                    referral_type,
+                    urgency,
+                    referral_status,
+                    referral_date,
+                    completion_date,
+                    followup_deadline,
+                    escalation_level,
+                    escalated_to,
+                    last_updated
+                )
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     referral_id,
@@ -1304,24 +1277,250 @@ def create_app() -> FastAPI:
                     payload.referral_type,
                     payload.urgency,
                     "Pending",
-                    datetime.utcnow().date().isoformat(),
+                    created_on.isoformat(),
                     None,
+                    followup_by.isoformat(),
+                    0,
+                    None,
+                    created_on.isoformat(),
                 ),
             )
-        if postgres_dsn:
-            _create_referral_pg(postgres_dsn, payload, referral_id)
+        
+        # Generate follow-up activities based on risk profile
+        domain_scores_dict = getattr(payload, 'domain_scores', {})
+        if not isinstance(domain_scores_dict, dict):
+            domain_scores_dict = {}
+        
+        _generate_follow_up_activities(
+            db_path,
+            referral_id=referral_id,
+            child_id=payload.child_id,
+            risk_level=payload.overall_risk,
+            domain_scores=domain_scores_dict,
+            autism_risk=getattr(payload, 'autism_risk', 'Low'),
+            nutrition_risk=getattr(payload, 'nutrition_risk', 'Low'),
+        )
+        
         return response
+
+    @app.get("/referral/by-child/{child_id}")
+    def get_referral_by_child(child_id: str):
+        with _get_conn(db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT referral_id, child_id, aww_id, referral_type, urgency, referral_status,
+                       referral_date, followup_deadline, escalation_level, escalated_to, last_updated
+                FROM referral_action
+                WHERE child_id = ?
+                ORDER BY referral_date DESC, referral_id DESC
+                LIMIT 1
+                """,
+                (child_id,),
+            ).fetchone()
+            screen = conn.execute(
+                """
+                SELECT overall_risk
+                FROM screening_event
+                WHERE child_id = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """,
+                (child_id,),
+            ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Referral not found for child")
+
+        referral_type = (row["referral_type"] or "").strip().upper()
+        severity = _normalize_risk(screen["overall_risk"] if screen else "")
+        if severity == "Critical":
+            urgency = "Immediate"
+            referral_type_label = "Immediate Specialist Referral"
+            followup_days = 2
+            facility = "District Specialist"
+        else:
+            urgency = "Priority"
+            referral_type_label = "Specialist Evaluation"
+            followup_days = 10
+            facility = "Block Specialist"
+
+        referral_date = _parse_date_safe(row["referral_date"]) or datetime.utcnow().date()
+        followup_by = _parse_date_safe(row["followup_deadline"]) or (
+            referral_date + timedelta(days=followup_days)
+        )
+
+        with _get_conn(db_path) as conn:
+            _apply_overdue_escalation(
+                conn,
+                referral_id=row["referral_id"],
+                status=row["referral_status"],
+                followup_deadline=followup_by.isoformat(),
+                escalation_level=row["escalation_level"],
+            )
+
+        return {
+            "referral_id": row["referral_id"],
+            "child_id": row["child_id"],
+            "aww_id": row["aww_id"],
+            "referral_type": referral_type,
+            "referral_type_label": referral_type_label,
+            "urgency": urgency,
+            "facility": facility,
+            "status": _current_referral_status(row["referral_id"]),
+            "created_on": referral_date.isoformat(),
+            "followup_by": followup_by.isoformat(),
+            "escalation_level": int(row["escalation_level"] or 0),
+            "escalated_to": row["escalated_to"],
+            "last_updated": row["last_updated"] or referral_date.isoformat(),
+        }
+
+    @app.get("/referral/child/{child_id}/details")
+    def get_referral_details(child_id: str):
+        with _get_conn(db_path) as conn:
+            referral = conn.execute(
+                """
+                SELECT referral_id, child_id, aww_id, referral_type, urgency, referral_status,
+                       referral_date, completion_date, appointment_date, followup_deadline,
+                       escalation_level, escalated_to, last_updated
+                FROM referral_action
+                WHERE child_id = ?
+                ORDER BY referral_date DESC, referral_id DESC
+                LIMIT 1
+                """,
+                (child_id,),
+            ).fetchone()
+            if referral is None:
+                raise HTTPException(status_code=404, detail="Referral not found for child")
+
+            child = conn.execute(
+                """
+                SELECT child_id, child_name, gender, age_months, village, awc_id
+                FROM child_profile
+                WHERE child_id = ?
+                LIMIT 1
+                """,
+                (child_id,),
+            ).fetchone()
+            screen = conn.execute(
+                """
+                SELECT id, overall_risk, explainability
+                FROM screening_event
+                WHERE child_id = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """,
+                (child_id,),
+            ).fetchone()
+            domain_rows = []
+            if screen is not None:
+                domain_rows = conn.execute(
+                    """
+                    SELECT domain, risk_label
+                    FROM screening_domain_score
+                    WHERE screening_id = ?
+                    """,
+                    (screen["id"],),
+                ).fetchall()
+
+        severity = _normalize_risk(screen["overall_risk"] if screen else "Low").upper()
+        risk_score = int(sum(_risk_points(r["risk_label"]) for r in domain_rows) * 2)
+
+        delayed_domains = [
+            _domain_display(r["domain"])
+            for r in domain_rows
+            if str(r["domain"]).upper() in {"GM", "FM", "LC", "COG", "SE"}
+            and _risk_rank(str(r["risk_label"])) >= 1
+        ]
+        # Preserve order and remove duplicates.
+        delayed_domains = list(dict.fromkeys(delayed_domains))
+
+        autism_label = "No Significant Risk"
+        adhd_label = "No Significant Risk"
+        for r in domain_rows:
+            domain_key = str(r["domain"]).upper()
+            value = _normalize_risk(str(r["risk_label"]))
+            if domain_key == "BPS_AUT":
+                autism_label = f"{value} Risk" if value in {"Medium", "High", "Critical"} else "No Significant Risk"
+            if domain_key == "BPS_ADHD":
+                adhd_label = f"{value} Risk" if value in {"Medium", "High", "Critical"} else "No Significant Risk"
+
+        behavior_flags = []
+        explainability = str(screen["explainability"] if screen else "").strip()
+        if explainability:
+            for token in [t.strip() for t in explainability.replace("\n", ";").split(";") if t.strip()]:
+                # Skip raw domain labels like "GM: high", keep meaningful notes.
+                if ":" in token and token.split(":", 1)[0].strip().upper() in {"GM", "FM", "LC", "COG", "SE"}:
+                    continue
+                behavior_flags.append(token)
+                if len(behavior_flags) >= 3:
+                    break
+        if not behavior_flags:
+            behavior_flags = ["No behavioral red flags observed."]
+
+        if severity == "CRITICAL":
+            urgency = "Immediate"
+            facility = "District specialist"
+            followup_days = 2
+        else:
+            urgency = "Priority"
+            facility = "Block / District specialist"
+            followup_days = 10
+
+        created_on = _parse_date_safe(referral["referral_date"]) or datetime.utcnow().date()
+        deadline = _parse_date_safe(referral["followup_deadline"])
+        if deadline is None:
+            deadline = created_on + timedelta(days=followup_days)
+        appointment_date = _parse_date_safe(referral["appointment_date"])
+        completion_date = _parse_date_safe(referral["completion_date"])
+
+        with _get_conn(db_path) as conn:
+            _apply_overdue_escalation(
+                conn,
+                referral_id=referral["referral_id"],
+                status=referral["referral_status"],
+                followup_deadline=deadline.isoformat(),
+                escalation_level=referral["escalation_level"],
+            )
+
+        return {
+            "referral_id": referral["referral_id"],
+            "child_info": {
+                "name": str(child["child_name"] or child_id) if child else child_id,
+                "child_id": child_id,
+                "age": int(child["age_months"] or 0) if child else 0,
+                "gender": str(child["gender"] or "Unknown") if child else "Unknown",
+                "village_or_awc_id": str(
+                    child["village"] or child["awc_id"] or "N/A"
+                ) if child else "N/A",
+                "assigned_worker": str(referral["aww_id"] or "N/A"),
+            },
+            "risk_summary": {
+                "severity": severity,
+                "risk_score": risk_score,
+                "delayed_domains": delayed_domains,
+                "autism_risk": autism_label,
+                "adhd_risk": adhd_label,
+                "behavior_flags": behavior_flags,
+            },
+            "decision": {
+                "urgency": urgency.upper(),
+                "facility": facility,
+                "created_on": created_on.isoformat(),
+                "deadline": deadline.isoformat(),
+                "escalation_level": int(referral["escalation_level"] or 0),
+                "escalated_to": referral["escalated_to"],
+            },
+            "status": _status_to_frontend(referral["referral_status"]),
+            "appointment_date": appointment_date.isoformat() if appointment_date else None,
+            "completion_date": completion_date.isoformat() if completion_date else None,
+            "last_updated": referral["last_updated"] or created_on.isoformat(),
+        }
 
     @app.get("/analytics/monitoring")
     def analytics_monitoring(role: str = "state", location_id: str = "") -> dict:
-        if postgres_dsn:
-            return _compute_monitoring_postgres(postgres_dsn, role=role, location_id=location_id)
         return _compute_monitoring(db_path, role=role, location_id=location_id)
 
     @app.get("/analytics/impact")
     def analytics_impact(role: str = "state", location_id: str = "") -> dict:
-        if postgres_dsn:
-            return _compute_impact_postgres(postgres_dsn, role=role, location_id=location_id)
         return _compute_impact(db_path, role=role, location_id=location_id)
 
     @app.post("/intervention/plan")
@@ -1349,22 +1548,6 @@ def create_app() -> FastAPI:
                     normalized[k] = "Normal"
             data["domain_scores"] = normalized
         result = generate_intervention(data)
-        child_id = str(data.get("child_id") or "")
-        if child_id:
-            with _get_conn(db_path) as conn:
-                conn.execute(
-                    """
-                    INSERT INTO intervention_history(child_id, source, request_json, response_json, created_at)
-                    VALUES(?,?,?,?,?)
-                    """,
-                    (
-                        child_id,
-                        "intervention/plan",
-                        json.dumps(data),
-                        json.dumps(result),
-                        datetime.utcnow().isoformat(),
-                    ),
-                )
         return result
 
     class FollowupRequest(BaseModel):
@@ -1374,56 +1557,7 @@ def create_app() -> FastAPI:
 
     @app.post("/followup/assess")
     def followup_assess(payload: FollowupRequest):
-        reduction, trend = calculate_trend(payload.baseline_delay, payload.followup_delay)
-        now_iso = datetime.utcnow().isoformat()
-        with _get_conn(db_path) as conn:
-            conn.execute(
-                """
-                INSERT INTO followup_assessment(child_id, baseline_delay, followup_delay, delay_reduction, trend, created_at)
-                VALUES(?,?,?,?,?,?)
-                """,
-                (
-                    payload.child_id,
-                    int(payload.baseline_delay),
-                    int(payload.followup_delay),
-                    int(reduction),
-                    trend,
-                    now_iso,
-                ),
-            )
-            conn.execute(
-                """
-                INSERT INTO followup_outcome(child_id, baseline_delay_months, followup_delay_months, improvement_status, followup_completed, followup_date)
-                VALUES(?,?,?,?,?,?)
-                """,
-                (
-                    payload.child_id,
-                    int(payload.baseline_delay),
-                    int(payload.followup_delay),
-                    "Improving" if trend == "Improved" else ("Worsening" if trend == "Worsened" else "No Change"),
-                    1,
-                    datetime.utcnow().date().isoformat(),
-                ),
-            )
-        if postgres_dsn:
-            with _pg_connect(postgres_dsn) as pg_conn:
-                with pg_conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        INSERT INTO followup_outcome(child_id, baseline_delay_months, followup_delay_months, improvement_status, followup_completed, followup_date)
-                        VALUES(%s,%s,%s,%s,%s,%s)
-                        """,
-                        (
-                            payload.child_id,
-                            int(payload.baseline_delay),
-                            int(payload.followup_delay),
-                            "Improving" if trend == "Improved" else ("Worsening" if trend == "Worsened" else "No Change"),
-                            1,
-                            datetime.utcnow().date().isoformat(),
-                        ),
-                    )
-                pg_conn.commit()
-        return {"delay_reduction": reduction, "trend": trend}
+        return calculate_trend(payload.baseline_delay, payload.followup_delay)
 
     class ProblemBPlanRequest(BaseModel):
         child_id: str
@@ -1436,23 +1570,7 @@ def create_app() -> FastAPI:
 
     @app.post("/problem-b/intervention-plan")
     def problem_b_intervention_plan(payload: ProblemBPlanRequest):
-        req = payload.dict()
-        result = generate_intervention_plan(req)
-        with _get_conn(db_path) as conn:
-            conn.execute(
-                """
-                INSERT INTO intervention_history(child_id, source, request_json, response_json, created_at)
-                VALUES(?,?,?,?,?)
-                """,
-                (
-                    payload.child_id,
-                    "problem-b/intervention-plan",
-                    json.dumps(req),
-                    json.dumps(result),
-                    datetime.utcnow().isoformat(),
-                ),
-            )
-        return result
+        return generate_intervention_plan(payload.model_dump())
 
     class ProblemBTrendRequest(BaseModel):
         baseline_delay: int
@@ -1526,8 +1644,8 @@ def create_app() -> FastAPI:
             delayed_domains=delayed,
             severity_level=severity,
         )
-        _save_state(db_path, "pb_activity_rows", payload.child_id, assigned)
-        _save_state(db_path, "pb_activity_summary", payload.child_id, summary)
+        activity_tracking_store[payload.child_id] = assigned
+        activity_plan_summary_store[payload.child_id] = summary
         return _phase_payload(payload.child_id)
 
     @app.get("/problem-b/activities/{child_id}")
@@ -1541,7 +1659,7 @@ def create_app() -> FastAPI:
 
     @app.post("/problem-b/activities/mark-status")
     def update_activity_status(payload: ActivityStatusUpdateRequest):
-        rows = _load_state(db_path, "pb_activity_rows", payload.child_id, [])
+        rows = activity_tracking_store.get(payload.child_id, [])
         status = payload.status.strip().lower()
         if status not in {"pending", "completed", "skipped"}:
             raise HTTPException(status_code=400, detail="Invalid status")
@@ -1557,7 +1675,6 @@ def create_app() -> FastAPI:
                 break
         if not updated:
             raise HTTPException(status_code=404, detail="Activity not found")
-        _save_state(db_path, "pb_activity_rows", payload.child_id, rows)
         return {
             "status": "ok",
             "child_id": payload.child_id,
@@ -1568,9 +1685,9 @@ def create_app() -> FastAPI:
 
     @app.get("/problem-b/compliance/{child_id}")
     def get_problem_b_compliance(child_id: str):
-        rows = _load_state(db_path, "pb_activity_rows", child_id, [])
+        rows = activity_tracking_store.get(child_id, [])
         compliance = compute_compliance(rows)
-        summary = _load_state(db_path, "pb_activity_summary", child_id, {})
+        summary = activity_plan_summary_store.get(child_id, {})
         phase_weeks = int(summary.get("phase_duration_weeks", 1) or 1)
         weekly_rows = weekly_progress_rows(rows, phase_weeks)
         return {
@@ -1589,9 +1706,8 @@ def create_app() -> FastAPI:
         freq = payload.frequency_type.strip().lower()
         if freq not in {"daily", "weekly"}:
             raise HTTPException(status_code=400, detail="frequency_type must be daily or weekly")
-        rows = _load_state(db_path, "pb_activity_rows", payload.child_id, [])
+        rows = activity_tracking_store.get(payload.child_id, [])
         updated_count = reset_frequency_status(rows, freq)
-        _save_state(db_path, "pb_activity_rows", payload.child_id, rows)
         phase = _phase_payload(payload.child_id)
         return {
             "status": "ok",
@@ -1599,6 +1715,443 @@ def create_app() -> FastAPI:
             "frequency_type": freq,
             "updated_count": updated_count,
             **phase,
+        }
+
+    class AppointmentCreateRequest(BaseModel):
+        referral_id: str
+        child_id: str
+        scheduled_date: str
+        appointment_type: str
+        notes: Optional[str] = ""
+        created_by: Optional[str] = "aww"
+
+    class AppointmentUpdateRequest(BaseModel):
+        status: str
+        notes: Optional[str] = ""
+
+    @app.post("/appointments")
+    def create_appointment(payload: AppointmentCreateRequest):
+        appointment_id = f"appt_{uuid.uuid4().hex[:10]}"
+        record = {
+            "appointment_id": appointment_id,
+            "referral_id": payload.referral_id,
+            "child_id": payload.child_id,
+            "scheduled_date": payload.scheduled_date,
+            "appointment_type": payload.appointment_type,
+            "status": "SCHEDULED",
+            "created_by": payload.created_by or "aww",
+            "created_on": datetime.utcnow().isoformat(),
+            "notes": payload.notes or "",
+        }
+        appointments_store.setdefault(payload.referral_id, []).append(record)
+        return {
+            "status": "ok",
+            "appointment": record,
+            "suggested_status": _suggested_referral_status(payload.referral_id),
+            "current_status": _current_referral_status(payload.referral_id),
+        }
+
+    @app.put("/appointments/{appointment_id}")
+    def update_appointment(appointment_id: str, payload: AppointmentUpdateRequest):
+        new_status = payload.status.strip().upper()
+        if new_status not in {"SCHEDULED", "COMPLETED", "CANCELLED", "RESCHEDULED", "MISSED"}:
+            raise HTTPException(status_code=400, detail="Invalid appointment status")
+        for referral_id, records in appointments_store.items():
+            for record in records:
+                if record.get("appointment_id") == appointment_id:
+                    record["status"] = new_status
+                    if payload.notes:
+                        record["notes"] = payload.notes
+                    return {
+                        "status": "ok",
+                        "appointment": record,
+                        "suggested_status": _suggested_referral_status(referral_id),
+                        "current_status": _current_referral_status(referral_id),
+                    }
+        raise HTTPException(status_code=404, detail="Appointment not found")
+
+    @app.get("/referral/{referral_id}/appointments")
+    def list_appointments(referral_id: str):
+        try:
+            records = appointments_store.get(referral_id, [])
+            next_scheduled = None
+            scheduled = [r for r in records if r.get("status") == "SCHEDULED"]
+            if scheduled:
+                next_scheduled = sorted(scheduled, key=lambda r: r.get("scheduled_date") or "")[0]
+            return {
+                "referral_id": referral_id,
+                "appointments": records,
+                "suggested_status": _suggested_referral_status(referral_id),
+                "current_status": _current_referral_status(referral_id),
+                "next_appointment": next_scheduled,
+            }
+        except Exception as e:
+            print(f"Error listing appointments: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/referral/{referral_id}/status")
+    def update_referral_status(referral_id: str, payload: ReferralStatusUpdateRequest):
+        status = _status_to_db(payload.status)
+        today = _today_iso()
+        with _get_conn(db_path) as conn:
+            row = conn.execute(
+                "SELECT referral_id, referral_status FROM referral_action WHERE referral_id = ? LIMIT 1",
+                (referral_id,),
+            ).fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Referral not found")
+            completion_date = payload.completion_date or (
+                today if status == "Completed" else None
+            )
+            appointment_date = payload.appointment_date or (
+                today if status in {"Appointment Scheduled", "Under Treatment"} else None
+            )
+            escalation_level = None
+            followup_deadline = None
+            if status == "Missed":
+                current = conn.execute(
+                    "SELECT escalation_level FROM referral_action WHERE referral_id = ?",
+                    (referral_id,),
+                ).fetchone()
+                level = int(current["escalation_level"] or 0) + 1 if current else 1
+                escalation_level = level
+                followup_deadline = (
+                    datetime.utcnow().date() + timedelta(days=2)
+                ).isoformat()
+            conn.execute(
+                """
+                UPDATE referral_action
+                SET referral_status = ?,
+                    completion_date = COALESCE(?, completion_date),
+                    appointment_date = COALESCE(?, appointment_date),
+                    followup_deadline = COALESCE(?, followup_deadline),
+                    escalation_level = COALESCE(?, escalation_level),
+                    last_updated = ?
+                WHERE referral_id = ?
+                """,
+                (
+                    status,
+                    completion_date,
+                    appointment_date,
+                    followup_deadline,
+                    escalation_level,
+                    today,
+                    referral_id,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO referral_status_history(
+                    referral_id, old_status, new_status, changed_on, worker_id
+                )
+                VALUES(?,?,?,?,?)
+                """,
+                (
+                    referral_id,
+                    row["referral_status"],
+                    status,
+                    today,
+                    payload.worker_id,
+                ),
+            )
+        referral_status_store[referral_id] = _status_to_frontend(status)
+        return {
+            "status": "ok",
+            "referral_id": referral_id,
+            "current_status": _status_to_frontend(status),
+            "suggested_status": _suggested_referral_status(referral_id),
+        }
+
+    @app.put("/referral/update-status")
+    def update_referral_status_by_id(payload: ReferralStatusUpdateByIdRequest):
+        return update_referral_status(
+            payload.referral_id,
+            ReferralStatusUpdateRequest(
+                status=payload.status,
+                appointment_date=payload.appointment_date,
+                completion_date=payload.completion_date,
+                worker_id=payload.worker_id,
+            ),
+        )
+
+    @app.post("/referral/{referral_id}/escalate")
+    def escalate_referral(referral_id: str, payload: ReferralEscalateRequest):
+        today = _today_iso()
+        with _get_conn(db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT escalation_level, referral_status
+                FROM referral_action
+                WHERE referral_id = ?
+                """,
+                (referral_id,),
+            ).fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Referral not found")
+            level = int(row["escalation_level"] or 0) + 1
+            escalated_to = _escalation_target(level)
+            new_deadline = (datetime.utcnow().date() + timedelta(days=2)).isoformat()
+            conn.execute(
+                """
+                UPDATE referral_action
+                SET escalation_level = ?,
+                    escalated_to = ?,
+                    followup_deadline = ?,
+                    last_updated = ?
+                WHERE referral_id = ?
+                """,
+                (level, escalated_to, new_deadline, today, referral_id),
+            )
+        return {
+            "status": "ok",
+            "referral_id": referral_id,
+            "escalation_level": level,
+            "escalated_to": escalated_to,
+            "followup_deadline": new_deadline,
+        }
+
+    @app.get("/referral/{referral_id}/history")
+    def get_referral_history(referral_id: str):
+        with _get_conn(db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT id, referral_id, old_status, new_status, changed_on, worker_id
+                FROM referral_status_history
+                WHERE referral_id = ?
+                ORDER BY changed_on DESC, id DESC
+                """,
+                (referral_id,),
+            ).fetchall()
+        history = [
+            {
+                "id": r["id"],
+                "referral_id": r["referral_id"],
+                "old_status": _status_to_frontend(r["old_status"]),
+                "new_status": _status_to_frontend(r["new_status"]),
+                "changed_on": r["changed_on"],
+                "worker_id": r["worker_id"],
+            }
+            for r in rows
+        ]
+        return {"referral_id": referral_id, "history": history}
+
+    # ============================================================================
+    # Problem B: Follow-Up Tracking Endpoints
+    # ============================================================================
+
+    @app.get("/follow-up/{referral_id}")
+    def get_follow_up_page(referral_id: str):
+        """Get complete follow-up page data: referral summary + activities"""
+        with _get_conn(db_path) as conn:
+            # Get referral details
+            referral = conn.execute(
+                """
+                SELECT referral_id, child_id, aww_id, referral_type, urgency,
+                       referral_status, referral_date, followup_deadline,
+                       escalation_level, escalated_to
+                FROM referral_action
+                WHERE referral_id = ?
+                """,
+                (referral_id,),
+            ).fetchone()
+
+            if referral is None:
+                raise HTTPException(status_code=404, detail="Referral not found")
+
+            # Get follow-up activities
+            activities = conn.execute(
+                """
+                SELECT id, referral_id, target_user, domain, activity_title,
+                       activity_description, frequency, duration_days, created_on
+                FROM follow_up_activities
+                WHERE referral_id = ?
+                ORDER BY target_user, domain
+                """,
+                (referral_id,),
+            ).fetchall()
+
+            # Get activity completion logs
+            activity_logs = conn.execute(
+                """
+                SELECT activity_id, completed, completed_on, remarks
+                FROM follow_up_log
+                WHERE referral_id = ?
+                ORDER BY completed_on DESC
+                """,
+                (referral_id,),
+            ).fetchall()
+
+        # Build activity completion map
+        log_map = {int(log["activity_id"]): log for log in activity_logs}
+
+        # Format response
+        formatted_activities = []
+        for act in activities:
+            log = log_map.get(act["id"], {})
+            formatted_activities.append({
+                "id": act["id"],
+                "target_user": act["target_user"],
+                "domain": act["domain"],
+                "title": act["activity_title"],
+                "description": act["activity_description"],
+                "frequency": act["frequency"],
+                "duration_days": act["duration_days"],
+                "completed": log.get("completed", 0) == 1,
+                "completed_on": log.get("completed_on"),
+                "remarks": log.get("remarks"),
+            })
+
+        # Determine days to deadline
+        deadline = _parse_date_safe(referral["followup_deadline"])
+        today = datetime.utcnow().date()
+        days_remaining = (deadline - today).days if deadline else 0
+        is_overdue = days_remaining < 0 and _status_to_frontend(referral["referral_status"]) != "COMPLETED"
+
+        return {
+            "referral_id": referral_id,
+            "child_id": referral["child_id"],
+            "facility": referral["referral_type"],
+            "urgency": referral["urgency"],
+            "status": _status_to_frontend(referral["referral_status"]),
+            "created_on": referral["referral_date"],
+            "deadline": referral["followup_deadline"],
+            "days_remaining": days_remaining,
+            "is_overdue": is_overdue,
+            "escalation_level": referral["escalation_level"],
+            "escalated_to": referral["escalated_to"],
+            "activities": formatted_activities,
+            "total_activities": len(formatted_activities),
+            "completed_activities": sum(1 for a in formatted_activities if a["completed"]),
+        }
+
+    class CompleteActivityRequest(BaseModel):
+        remarks: Optional[str] = None
+
+    @app.post("/follow-up/{referral_id}/activity/{activity_id}/complete")
+    def complete_activity(referral_id: str, activity_id: int, payload: CompleteActivityRequest):
+        """Mark an activity as completed"""
+        today = datetime.utcnow().date().isoformat()
+
+        with _get_conn(db_path) as conn:
+            # Verify activity exists
+            activity = conn.execute(
+                """
+                SELECT id FROM follow_up_activities
+                WHERE id = ? AND referral_id = ?
+                """,
+                (activity_id, referral_id),
+            ).fetchone()
+
+            if activity is None:
+                raise HTTPException(status_code=404, detail="Activity not found")
+
+            # Insert completion log
+            conn.execute(
+                """
+                INSERT INTO follow_up_log (
+                    referral_id, activity_id, completed, completed_on, remarks
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (referral_id, activity_id, 1, today, payload.remarks or ""),
+            )
+
+        return {
+            "status": "ok",
+            "activity_id": activity_id,
+            "completed_on": today,
+        }
+
+    @app.get("/follow-up/{referral_id}/progress")
+    def get_follow_up_progress(referral_id: str):
+        """Get follow-up completion progress"""
+        with _get_conn(db_path) as conn:
+            # Count total activities
+            total = conn.execute(
+                """
+                SELECT COUNT(*) as cnt FROM follow_up_activities
+                WHERE referral_id = ?
+                """,
+                (referral_id,),
+            ).fetchone()["cnt"]
+
+            # Count completed activities
+            completed = conn.execute(
+                """
+                SELECT COUNT(DISTINCT activity_id) as cnt FROM follow_up_log
+                WHERE referral_id = ? AND completed = 1
+                """,
+                (referral_id,),
+            ).fetchone()["cnt"]
+
+        completion_percent = int((completed / total * 100) if total > 0 else 0)
+
+        return {
+            "referral_id": referral_id,
+            "total_activities": total,
+            "completed_activities": completed,
+            "completion_percent": completion_percent,
+        }
+
+    @app.post("/follow-up/auto-escalate-overdue")
+    def auto_escalate_overdue():
+        """Auto-escalate all overdue referrals that haven't been completed"""
+        today = datetime.utcnow().date()
+        escalated_count = 0
+
+        with _get_conn(db_path) as conn:
+            # Find all overdue referrals
+            overdue = conn.execute(
+                """
+                SELECT referral_id, escalation_level, referral_status
+                FROM referral_action
+                WHERE followup_deadline < ? AND referral_status != 'Completed'
+                """,
+                (today.isoformat(),),
+            ).fetchall()
+
+            for referral in overdue:
+                referral_id = referral["referral_id"]
+                current_level = int(referral["escalation_level"] or 0)
+                new_level = current_level + 1
+                escalated_to = _escalation_target(new_level)
+                new_deadline = (today + timedelta(days=2)).isoformat()
+
+                # Update referral
+                conn.execute(
+                    """
+                    UPDATE referral_action
+                    SET escalation_level = ?,
+                        escalated_to = ?,
+                        followup_deadline = ?,
+                        last_updated = ?
+                    WHERE referral_id = ?
+                    """,
+                    (new_level, escalated_to, new_deadline, today.isoformat(), referral_id),
+                )
+
+                # Log in status history
+                conn.execute(
+                    """
+                    INSERT INTO referral_status_history (
+                        referral_id, old_status, new_status, changed_on, worker_id
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        referral_id,
+                        referral["referral_status"],
+                        "Escalated (Overdue)",
+                        today.isoformat(),
+                        "SYSTEM_AUTO",
+                    ),
+                )
+
+                escalated_count += 1
+
+        return {
+            "status": "ok",
+            "escalated_count": escalated_count,
+            "timestamp": datetime.utcnow().isoformat(),
+            "message": f"Auto-escalated {escalated_count} overdue referral(s)",
         }
 
     class CaregiverEngagementRequest(BaseModel):
@@ -1609,27 +2162,9 @@ def create_app() -> FastAPI:
     @app.post("/caregiver/engage")
     def caregiver_engage(payload: CaregiverEngagementRequest):
         mode = payload.mode.lower()
-        status = "ok"
-        note = "Printed material to be provided"
         if "phone" in mode and payload.contact:
-            status = "queued"
-            note = "IVR/WhatsApp message scheduled"
-        with _get_conn(db_path) as conn:
-            conn.execute(
-                """
-                INSERT INTO caregiver_engagement_log(child_id, mode, contact_json, status, note, created_at)
-                VALUES(?,?,?,?,?,?)
-                """,
-                (
-                    payload.child_id,
-                    payload.mode,
-                    json.dumps(payload.contact or {}),
-                    status,
-                    note,
-                    datetime.utcnow().isoformat(),
-                ),
-            )
-        return {"status": status, "mode": payload.mode, "note": note}
+            return {"status": "queued", "mode": payload.mode, "note": "IVR/WhatsApp message scheduled"}
+        return {"status": "ok", "mode": payload.mode, "note": "Printed material to be provided"}
 
     class TasksSaveRequest(BaseModel):
         child_id: str
@@ -1641,20 +2176,248 @@ def create_app() -> FastAPI:
 
     @app.post("/tasks/save")
     def save_tasks(payload: TasksSaveRequest):
-        data = payload.dict()
+        data = payload.model_dump()
         child = data.pop("child_id")
-        _save_state(db_path, "tasks", child, data)
+        tasks_store[child] = data
         return {"status": "saved", "child_id": child}
 
     @app.get("/tasks/{child_id}")
     def get_tasks(child_id: str):
-        return _load_state(db_path, "tasks", child_id, {
+        return tasks_store.get(child_id, {
             "aww_checks": {},
             "parent_checks": {},
             "caregiver_checks": {},
             "aww_remarks": "",
             "caregiver_remarks": "",
         })
+
+    # ============================================================================
+    # Problem B: Intervention Plan Management Endpoints
+    # ============================================================================
+
+    class InterventionPlanCreateRequest(BaseModel):
+        child_id: str
+        domain: str
+        risk_level: str
+        baseline_delay_months: Optional[int] = 3
+        age_months: int
+
+    @app.post("/intervention/plan/create")
+    def create_intervention(payload: InterventionPlanCreateRequest):
+        """Create intervention phase from risk assessment - starts strict 7-phase lifecycle"""
+        try:
+            from .problem_b_service import problem_b_service
+        except ImportError:
+            from problem_b_service import problem_b_service
+
+        result = problem_b_service.create_intervention_phase(
+            child_id=payload.child_id,
+            domain=payload.domain,
+            severity=payload.risk_level,  # risk_level -> severity
+            baseline_delay=float(payload.baseline_delay_months),
+            age_months=payload.age_months
+        )
+        return result
+
+    class WeeklyProgressLogRequest(BaseModel):
+        phase_id: str
+        current_delay_months: float
+        aww_completed: Optional[int] = 0
+        caregiver_completed: Optional[int] = 0
+        notes: Optional[str] = ""
+
+    @app.post("/intervention/{phase_id}/progress/log")
+    def log_weekly_progress(phase_id: str, payload: WeeklyProgressLogRequest):
+        """Log activity completion and get review decision"""
+        try:
+            from .problem_b_service import problem_b_service
+        except ImportError:
+            from problem_b_service import problem_b_service
+
+        # Persist weekly task logs from AWW/Caregiver completion counts.
+        # This keeps compliance engine aligned with submitted weekly progress.
+        try:
+            with problem_b_service._get_conn(problem_b_service.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT activity_id, role FROM activities
+                    WHERE phase_id = ?
+                    ORDER BY role, created_at ASC
+                    """,
+                    (phase_id,),
+                )
+                activities = cursor.fetchall()
+                aww_ids = [r["activity_id"] for r in activities if str(r["role"]).strip().lower() == "aww"]
+                caregiver_ids = [r["activity_id"] for r in activities if str(r["role"]).strip().lower() != "aww"]
+                aww_completed = max(int(payload.aww_completed or 0), 0)
+                caregiver_completed = max(int(payload.caregiver_completed or 0), 0)
+                now = datetime.utcnow().isoformat()
+
+                def _log(activity_ids, completed_count):
+                    for idx, activity_id in enumerate(activity_ids):
+                        task_id = f"task_{uuid.uuid4().hex[:12]}"
+                        done = 1 if idx < completed_count else 0
+                        cursor.execute(
+                            """
+                            INSERT INTO task_logs(task_id, activity_id, date_logged, completed)
+                            VALUES (?, ?, ?, ?)
+                            """,
+                            (task_id, activity_id, now, done),
+                        )
+
+                _log(aww_ids, aww_completed)
+                _log(caregiver_ids, caregiver_completed)
+                conn.commit()
+        except Exception:
+            # Keep review flow non-blocking if task log insert has issues.
+            pass
+
+        # Calculate compliance for this phase
+        compliance = problem_b_service.calculate_compliance(phase_id)
+        
+        # Run review if at review date
+        review_result = problem_b_service.run_review_engine(phase_id, payload.current_delay_months)
+
+        return {
+            "phase_id": phase_id,
+            "decision": review_result.get("decision", "CONTINUE"),
+            "reason": review_result.get("reason", "Progress on track"),
+            "adherence": float(compliance),
+            "improvement": float(review_result.get("improvement", 0.0) or 0.0),
+            "review_id": review_result.get("review_id", ""),
+            "review_count": int(review_result.get("review_count", 0) or 0),
+            "compliance": compliance,
+            "review_decision": review_result,
+            "notes": payload.notes
+        }
+
+    @app.get("/intervention/{phase_id}/activities")
+    def get_intervention_activities(phase_id: str):
+        """Fetch generated activities for a phase."""
+        try:
+            with problem_b_service._get_conn(problem_b_service.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT activity_id, phase_id, domain, role, name, frequency_per_week, created_at
+                    FROM activities
+                    WHERE phase_id = ?
+                    ORDER BY role, created_at ASC
+                    """,
+                    (phase_id,),
+                )
+                rows = [dict(r) for r in cursor.fetchall()]
+            return {"phase_id": phase_id, "activities": rows}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/intervention/{phase_id}/history")
+    def get_intervention_history(phase_id: str):
+        """Fetch full phase history: status, activities, review decisions, task logs."""
+        try:
+            phase_status = problem_b_service.get_phase_status(phase_id)
+            if phase_status.get("status") == "error":
+                raise HTTPException(status_code=404, detail=phase_status.get("message", "Phase not found"))
+
+            with problem_b_service._get_conn(problem_b_service.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT activity_id, phase_id, domain, role, name, frequency_per_week, created_at
+                    FROM activities
+                    WHERE phase_id = ?
+                    ORDER BY role, created_at ASC
+                    """,
+                    (phase_id,),
+                )
+                activities = [dict(r) for r in cursor.fetchall()]
+
+                cursor.execute(
+                    """
+                    SELECT review_id, phase_id, review_date, compliance, improvement, decision_action, decision_reason
+                    FROM review_log
+                    WHERE phase_id = ?
+                    ORDER BY review_date DESC
+                    """,
+                    (phase_id,),
+                )
+                reviews = [dict(r) for r in cursor.fetchall()]
+
+                cursor.execute(
+                    """
+                    SELECT t.task_id, t.activity_id, t.date_logged, t.completed, a.role, a.name
+                    FROM task_logs t
+                    JOIN activities a ON a.activity_id = t.activity_id
+                    WHERE a.phase_id = ?
+                    ORDER BY t.date_logged DESC
+                    LIMIT 200
+                    """,
+                    (phase_id,),
+                )
+                task_logs = [dict(r) for r in cursor.fetchall()]
+
+            return {
+                "phase_id": phase_id,
+                "phase_status": phase_status,
+                "activities": activities,
+                "reviews": reviews,
+                "task_logs": task_logs,
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/intervention/{phase_id}/status")
+    def get_phase_status(phase_id: str):
+        """Get current phase status with metrics"""
+        try:
+            from .problem_b_service import problem_b_service
+        except ImportError:
+            from problem_b_service import problem_b_service
+
+        result = problem_b_service.get_phase_status(phase_id)
+        return result
+
+    @app.post("/intervention/{phase_id}/review")
+    def trigger_review(phase_id: str, payload: WeeklyProgressLogRequest):
+        """Trigger review engine - automatic decision point"""
+        try:
+            from .problem_b_service import problem_b_service
+        except ImportError:
+            from problem_b_service import problem_b_service
+
+        result = problem_b_service.run_review_engine(phase_id, payload.current_delay_months)
+        return result
+
+    class PlanClosureRequest(BaseModel):
+        closure_status: str = "success"  # success, referred, extended
+        final_notes: Optional[str] = ""
+
+    @app.post("/intervention/{phase_id}/complete")
+    def complete_intervention_phase(phase_id: str, payload: PlanClosureRequest):
+        """Mark intervention phase as completed"""
+        try:
+            db_path = "problem_b.db"
+            with _get_conn(db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE intervention_phase SET status = 'COMPLETED' WHERE phase_id = ?",
+                    (phase_id,),
+                )
+                if cursor.rowcount == 0:
+                    raise HTTPException(status_code=404, detail="Phase not found")
+
+                conn.commit()
+                return {
+                    "phase_id": phase_id,
+                    "status": "COMPLETED",
+                    "closure_type": payload.closure_status,
+                    "completed_at": datetime.utcnow().isoformat(),
+                }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
 
     return app
 

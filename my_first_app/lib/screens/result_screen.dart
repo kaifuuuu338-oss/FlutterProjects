@@ -80,7 +80,7 @@ class _ResultScreenState extends State<ResultScreen> {
 
   bool get _shouldShowReferralAction {
     final overall = _deriveOverallRisk();
-    return overall == 'high' || overall == 'critical';
+    return overall == 'high' || overall == 'critical' || overall == 'medium';
   }
 
   String _referralGuidanceText(AppLocalizations l10n) {

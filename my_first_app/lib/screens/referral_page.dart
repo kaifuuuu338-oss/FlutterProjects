@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:my_first_app/services/api_service.dart';
+import 'package:my_first_app/screens/followup_complete_screen.dart';
 
 class ReferralPage extends StatefulWidget {
   final String childId;
@@ -79,8 +80,9 @@ class _ReferralPageState extends State<ReferralPage> {
     final risk = widget.overallRisk.trim().toLowerCase();
     final isHigh = risk == 'high' || risk.contains('high');
     final isCritical = risk == 'critical' || risk.contains('critical');
-    if (!isHigh && !isCritical) {
-      throw Exception('No referral required for medium/low risk.');
+    final isMedium = risk == 'medium' || risk.contains('medium');
+    if (!isHigh && !isCritical && !isMedium) {
+      throw Exception('No referral required for low risk.');
     }
 
     try {
@@ -609,6 +611,28 @@ class _ReferralPageState extends State<ReferralPage> {
                       ? null
                       : _escalate,
                   child: const Text('Escalate Further'),
+                ),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    final referralId = _data?['referral_id'] ?? '';
+                    final childId = widget.childId;
+                    if (referralId.isNotEmpty) {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => FollowupCompleteScreen(
+                            referralId: referralId,
+                            childId: childId,
+                            userRole: 'AWW',
+                          ),
+                        ),
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.assignment_turned_in),
+                  label: const Text('View Follow-Up Activities'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.teal,
+                  ),
                 ),
               ],
             ),
