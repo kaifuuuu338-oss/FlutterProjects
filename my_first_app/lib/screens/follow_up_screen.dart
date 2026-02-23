@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
-import 'package:intl/intl.dart';
 
 class FollowUpScreen extends StatefulWidget {
   final String childId;
@@ -66,6 +65,7 @@ class _FollowUpScreenState extends State<FollowUpScreen> {
       // Refresh data
       _loadFollowUp();
 
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('${activity.title} marked complete'),
@@ -74,6 +74,7 @@ class _FollowUpScreenState extends State<FollowUpScreen> {
         ),
       );
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to mark activity: $e'),

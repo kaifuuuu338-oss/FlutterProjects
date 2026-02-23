@@ -6,16 +6,39 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from .database_models import Base
 
-# Database URL
-DATABASE_URL = os.getenv(
-    "REFERRAL_DATABASE_URL",
-    "postgresql+psycopg2://localhost:5432/referral_system"
+def _is_postgres_url(db_url: str) -> bool:
+    normalized = (db_url or "").strip().lower()
+    return normalized.startswith("postgresql://") or normalized.startswith("postgres://")
+
+
+def _require_postgres_url(db_url: str) -> str:
+    if not _is_postgres_url(db_url):
+        raise RuntimeError(
+            "REFERRAL_DATABASE_URL must be a PostgreSQL URL, for example "
+            "'postgresql://postgres:postgres@127.0.0.1:5432/ecd_data'."
+        )
+    return db_url
+
+
+# Database URL (PostgreSQL-only)
+DATABASE_URL = _require_postgres_url(
+    os.getenv(
+        "REFERRAL_DATABASE_URL",
+        os.getenv(
+            "ECD_DATABASE_URL",
+            os.getenv(
+                "DATABASE_URL",
+                "postgresql://postgres:postgres@127.0.0.1:5432/ecd_data",
+            ),
+        ),
+    )
 )
 
 # Create engine
 engine = create_engine(
     DATABASE_URL,
-    echo=False
+    echo=False,
+    pool_pre_ping=True,
 )
 
 # Session factory

@@ -1,5 +1,0 @@
-Django>=4.2
-httpx>=0.24
-python-dotenv>=1.0
-djangorestframework>=3.14
-psycopg2-binary>=2.9

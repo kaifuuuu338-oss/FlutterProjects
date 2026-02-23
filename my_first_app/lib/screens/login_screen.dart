@@ -273,7 +273,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 Row(
                                   children: [
                                     Checkbox(
-                                      value: (_rememberMe ?? false),
+                                      value: _rememberMe,
                                       onChanged: (v) => setState(() => _rememberMe = v ?? false),
                                     ),
                                     Expanded(child: Text(l10n.t('remember_for_30_days'))),

@@ -5,10 +5,14 @@ Core logic follows: Risk → Phase → Activities → Compliance → Review → 
 
 from __future__ import annotations
 
-import sqlite3
+import os
 import uuid
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
+try:
+    from .pg_compat import get_conn
+except Exception:
+    from pg_compat import get_conn
 
 
 class ProblemBService:
@@ -30,37 +34,28 @@ class ProblemBService:
     REVIEW_INTERVAL_DAYS = 42  # 6 weeks
     IMPROVEMENT_THRESHOLD = 1.0  # 1 month
 
-    def __init__(self, db_path: str = "problem_b.db"):
+    def __init__(
+        self,
+        db_path: str = os.getenv(
+            "ECD_DATABASE_URL",
+            os.getenv("DATABASE_URL", "postgresql://postgres:postgres@127.0.0.1:5432/ecd_data"),
+        ),
+    ):
         self.db_path = db_path
         self._ensure_db()
 
     def _get_conn(self, db_path: str):
-        """Get database connection context manager"""
-        class DBConnection:
-            def __init__(self, path):
-                self.path = path
-                self.conn = None
-
-            def __enter__(self):
-                self.conn = sqlite3.connect(self.path)
-                self.conn.row_factory = sqlite3.Row
-                return self.conn
-
-            def __exit__(self, *args):
-                if self.conn:
-                    self.conn.commit()
-                    self.conn.close()
-
-        return DBConnection(db_path)
+        return get_conn(db_path)
 
     def _ensure_db(self):
         """Ensure database tables exist."""
         with self._get_conn(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='intervention_phase'"
+                "SELECT to_regclass('public.intervention_phase') AS table_name"
             )
-            if not cursor.fetchone():
+            existing = cursor.fetchone()
+            if not existing or not existing.get("table_name"):
                 schema_path = __file__.replace("problem_b_service.py", "problem_b_schema.sql")
                 try:
                     with open(schema_path, "r", encoding="utf-8") as f:
@@ -94,7 +89,7 @@ class ProblemBService:
                     INSERT INTO intervention_phase 
                     (phase_id, child_id, domain, severity, baseline_delay, 
                      start_date, review_date, status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE')
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'ACTIVE')
                     """,
                     (phase_id, child_id, domain, severity, baseline_delay,
                      start_date.isoformat(), next_review.isoformat()),
@@ -112,7 +107,7 @@ class ProblemBService:
                         """
                         INSERT INTO activities
                         (activity_id, phase_id, domain, role, name, frequency_per_week)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        VALUES (%s, %s, %s, %s, %s, %s)
                         """,
                         (activity_id, phase_id, domain, act["role"], 
                          act["name"], act["frequency_per_week"]),
@@ -212,7 +207,7 @@ class ProblemBService:
                 # Total tasks this week
                 cursor.execute(
                     """
-                    SELECT COUNT(*) as total FROM activities WHERE phase_id = ?
+                    SELECT COUNT(*) as total FROM activities WHERE phase_id = %s
                     """,
                     (phase_id,),
                 )
@@ -226,9 +221,9 @@ class ProblemBService:
                 cursor.execute(
                     """
                     SELECT COUNT(*) as completed FROM task_logs 
-                    WHERE activity_id IN (SELECT activity_id FROM activities WHERE phase_id = ?)
+                    WHERE activity_id IN (SELECT activity_id FROM activities WHERE phase_id = %s)
                     AND completed = 1 
-                    AND date_logged > ?
+                    AND date_logged > %s
                     """,
                     (phase_id, week_ago),
                 )
@@ -253,7 +248,7 @@ class ProblemBService:
             with self._get_conn(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT baseline_delay FROM intervention_phase WHERE phase_id = ?",
+                    "SELECT baseline_delay FROM intervention_phase WHERE phase_id = %s",
                     (phase_id,),
                 )
                 row = cursor.fetchone()
@@ -290,7 +285,7 @@ class ProblemBService:
             with self._get_conn(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT COUNT(*) as count FROM review_log WHERE phase_id = ?",
+                    "SELECT COUNT(*) as count FROM review_log WHERE phase_id = %s",
                     (phase_id,),
                 )
                 review_count = cursor.fetchone()["count"]
@@ -327,7 +322,7 @@ class ProblemBService:
                     """
                     INSERT INTO review_log
                     (review_id, phase_id, review_date, compliance, improvement, decision_action, decision_reason)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                     """,
                     (review_id, phase_id, datetime.now().isoformat(),
                      compliance * 100, improvement, decision, reason),
@@ -362,7 +357,7 @@ class ProblemBService:
                     """
                     UPDATE activities 
                     SET frequency_per_week = frequency_per_week + 1
-                    WHERE phase_id = ?
+                    WHERE phase_id = %s
                     """,
                     (phase_id,),
                 )
@@ -387,7 +382,7 @@ class ProblemBService:
 
                 # Get phase details
                 cursor.execute(
-                    "SELECT child_id, domain, severity FROM intervention_phase WHERE phase_id = ?",
+                    "SELECT child_id, domain, severity FROM intervention_phase WHERE phase_id = %s",
                     (phase_id,),
                 )
                 phase = cursor.fetchone()
@@ -401,7 +396,7 @@ class ProblemBService:
                     """
                     INSERT INTO referral
                     (referral_id, child_id, domain, urgency, status, created_on)
-                    VALUES (?, ?, ?, 'IMMEDIATE', 'PENDING', ?)
+                    VALUES (%s, %s, %s, 'IMMEDIATE', 'PENDING', %s)
                     """,
                     (referral_id, phase["child_id"], phase["domain"],
                      datetime.now().isoformat()),
@@ -409,7 +404,7 @@ class ProblemBService:
 
                 # Update phase status
                 cursor.execute(
-                    "UPDATE intervention_phase SET status = 'ESCALATED' WHERE phase_id = ?",
+                    "UPDATE intervention_phase SET status = 'ESCALATED' WHERE phase_id = %s",
                     (phase_id,),
                 )
                 conn.commit()
@@ -441,7 +436,7 @@ class ProblemBService:
                     """
                     INSERT INTO task_logs
                     (task_id, activity_id, date_logged, completed)
-                    VALUES (?, ?, ?, 1)
+                    VALUES (%s, %s, %s, 1)
                     """,
                     (task_id, activity_id, datetime.now().isoformat()),
                 )
@@ -466,7 +461,7 @@ class ProblemBService:
 
                 # Get phase
                 cursor.execute(
-                    "SELECT * FROM intervention_phase WHERE phase_id = ?",
+                    "SELECT * FROM intervention_phase WHERE phase_id = %s",
                     (phase_id,),
                 )
                 phase = cursor.fetchone()
@@ -476,7 +471,7 @@ class ProblemBService:
 
                 # Get activities
                 cursor.execute(
-                    "SELECT COUNT(*) as count FROM activities WHERE phase_id = ?",
+                    "SELECT COUNT(*) as count FROM activities WHERE phase_id = %s",
                     (phase_id,),
                 )
                 activity_count = cursor.fetchone()["count"]
@@ -486,7 +481,7 @@ class ProblemBService:
                 # Get latest review
                 cursor.execute(
                     """
-                    SELECT * FROM review_log WHERE phase_id = ? 
+                    SELECT * FROM review_log WHERE phase_id = %s 
                     ORDER BY review_date DESC LIMIT 1
                     """,
                     (phase_id,),
@@ -510,8 +505,23 @@ class ProblemBService:
             return {"status": "error", "message": str(e)}
 
 
-# Singleton instance
-problem_b_service = ProblemBService()
+class _ProblemBServiceProxy:
+    """Lazily initialize ProblemBService to avoid import-time DB failures."""
+
+    def __init__(self):
+        self._service: Optional[ProblemBService] = None
+
+    def _ensure(self) -> ProblemBService:
+        if self._service is None:
+            self._service = ProblemBService()
+        return self._service
+
+    def __getattr__(self, name):
+        return getattr(self._ensure(), name)
+
+
+# Singleton proxy instance
+problem_b_service = _ProblemBServiceProxy()
 
 
 def _normalize_severity(value: str) -> str:
@@ -604,3 +614,4 @@ def schema_tables() -> Dict:
             "referral",
         ]
     }
+

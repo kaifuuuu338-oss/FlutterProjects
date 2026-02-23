@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:my_first_app/core/localization/app_localizations.dart';
-import 'package:my_first_app/models/referral_model.dart';
 import 'package:my_first_app/models/screening_model.dart';
 import 'package:my_first_app/services/api_service.dart';
 import 'package:my_first_app/services/local_db_service.dart';
@@ -831,52 +830,6 @@ class _ReferralDetailsScreenState extends State<ReferralDetailsScreen> {
     if (picked != null && mounted) {
       setState(() => onPicked(picked));
     }
-  }
-
-  ReferralStatus _toReferralStatus(String value) {
-    switch (value) {
-      case 'scheduled':
-        return ReferralStatus.scheduled;
-      case 'completed':
-        return ReferralStatus.completed;
-      case 'under_treatment':
-      case 'undertreatment':
-        return ReferralStatus.underTreatment;
-      default:
-        return ReferralStatus.pending;
-    }
-  }
-
-  Future<void> _showStatusPicker() async {
-    final selected = await showDialog<String>(
-      context: context,
-      builder: (_) => SimpleDialog(
-        title: const Text('Update Referral Status'),
-        children: <Widget>[
-          _statusDialogOption('pending', 'Pending'),
-          _statusDialogOption('scheduled', 'Appointment Scheduled'),
-          _statusDialogOption('completed', 'Completed'),
-          _statusDialogOption('under_treatment', 'Under Treatment'),
-        ],
-      ),
-    );
-    if (selected == null) return;
-    await _localDb.updateReferralStatus(widget.referralId, _toReferralStatus(selected));
-    if (!mounted) return;
-    setState(() => _currentStatus = selected);
-  }
-
-  Widget _statusDialogOption(String value, String label) {
-    return SimpleDialogOption(
-      onPressed: () => Navigator.of(context).pop(value),
-      child: Row(
-        children: <Widget>[
-          Icon(_currentStatus == value ? Icons.radio_button_checked : Icons.radio_button_off, size: 18),
-          const SizedBox(width: 8),
-          Text(label),
-        ],
-      ),
-    );
   }
 
   Widget _sectionCard(String title, Widget child) {

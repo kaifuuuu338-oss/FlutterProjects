@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
-import 'package:intl/intl.dart';
 
 class FollowupCompleteScreen extends StatefulWidget {
   final String referralId;
@@ -8,11 +7,11 @@ class FollowupCompleteScreen extends StatefulWidget {
   final String userRole; // AWW or CAREGIVER
 
   const FollowupCompleteScreen({
-    Key? key,
+    super.key,
     required this.referralId,
     required this.childId,
     this.userRole = 'AWW',
-  }) : super(key: key);
+  });
 
   @override
   State<FollowupCompleteScreen> createState() => _FollowupCompleteScreenState();
@@ -122,10 +121,12 @@ class _FollowupCompleteScreenState extends State<FollowupCompleteScreen> {
 
       // Reload data
       await _loadFollowUpData();
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Activity marked as completed!')),
       );
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: $e')),
       );

@@ -5,7 +5,10 @@ class AppConstants {
   static const String appVersion = '1.0.0';
   
   // API Endpoints
-  static const String baseUrl = 'http://localhost:8000';
+  static const String baseUrl = String.fromEnvironment(
+    'ECD_API_BASE_URL',
+    defaultValue: 'http://127.0.0.1:8001',
+  );
   static const String loginEndpoint = '/auth/login';
   static const String registerEndpoint = '/auth/register';
   // OTP / session endpoints (server-driven two-step flow)

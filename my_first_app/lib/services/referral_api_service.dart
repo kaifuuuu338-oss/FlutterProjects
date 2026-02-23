@@ -1,5 +1,4 @@
 import 'package:dio/dio.dart';
-import 'package:my_first_app/models/referral_model.dart';
 
 class ReferralApiService {
   final Dio _dio;

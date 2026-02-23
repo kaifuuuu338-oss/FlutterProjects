@@ -3,6 +3,7 @@ import 'package:my_first_app/core/localization/app_localizations.dart';
 import 'package:my_first_app/core/constants/app_constants.dart';
 import 'package:my_first_app/models/aww_model.dart';
 import 'package:my_first_app/services/auth_service.dart';
+import 'package:my_first_app/services/api_service.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:my_first_app/widgets/language_menu_button.dart';
 
@@ -23,6 +24,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
   final _awcController = TextEditingController(text: 'AWS_DEMO_001');
 
   final AuthService _auth = AuthService();
+  final APIService _apiService = APIService();
   final GoogleSignIn _googleSignIn = GoogleSignIn();
   bool _loading = false;
   bool _obscure = true;
@@ -114,16 +116,42 @@ class _SignUpScreenState extends State<SignUpScreen> {
     );
 
     try {
+      // First, save locally
       final ok = await _auth.register(aww);
+      
+      if (!ok) {
+        setState(() => _loading = false);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.t('error_invalid_login'))));
+        return;
+      }
+
+      // Then, sync to backend PostgreSQL database via API
+      try {
+        final payload = {
+          'aww_id': aww.awwId,
+          'name': aww.name,
+          'mobile_number': aww.mobileNumber,
+          'password': aww.password,
+          'awc_code': aww.awcCode,
+          'mandal': aww.mandal,
+          'district': aww.district,
+          'created_at': aww.createdAt.toIso8601String(),
+          'updated_at': aww.updatedAt.toIso8601String(),
+        };
+        
+        await _apiService.registerAWW(payload);
+        print('✅ AWW registered successfully in PostgreSQL database');
+      } catch (apiError) {
+        print('⚠️ Local registration done, but API sync failed: $apiError');
+        // Don't fail the registration if local save succeeded
+      }
+
       setState(() => _loading = false);
       if (!mounted) return;
-      if (ok) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.t('registration_success'))));
-        // Return to Login screen and indicate a normal registration completed
-        Navigator.of(context).pop({'mobile': mobile, 'name': name, 'registered': 'true'});
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.t('error_invalid_login'))));
-      }
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.t('registration_success'))));
+      // Return to Login screen and indicate a normal registration completed
+      Navigator.of(context).pop({'mobile': mobile, 'name': name, 'registered': 'true'});
     } catch (e) {
       setState(() => _loading = false);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${l10n.t('error_invalid_login')}: $e')));

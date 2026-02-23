@@ -7,8 +7,8 @@ import 'package:my_first_app/screens/consent_screen.dart';
 import 'package:my_first_app/screens/dashboard_screen.dart';
 import 'package:my_first_app/screens/result_screen.dart';
 import 'package:my_first_app/screens/settings_screen.dart';
+import 'package:my_first_app/services/api_service.dart';
 import 'package:my_first_app/services/local_db_service.dart';
-import 'package:my_first_app/services/sync_service.dart';
 import 'package:my_first_app/widgets/language_menu_button.dart';
 
 class ChildRegistrationScreen extends StatefulWidget {
@@ -22,6 +22,7 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
   static const List<String> _assessmentCycles = ['Baseline'];
 
   final _formKey = GlobalKey<FormState>();
+  final APIService _api = APIService();
   final LocalDBService _localDb = LocalDBService();
   final TextEditingController _childIdController = TextEditingController(
     text: 'child_${DateTime.now().millisecondsSinceEpoch}',
@@ -117,10 +118,31 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
       updatedAt: DateTime.now(),
     );
 
+    try {
+      await _api.registerChild(child, assessmentCycle: _assessmentCycle);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'PostgreSQL save failed. Backend not reachable at '
+            '${AppConstants.baseUrl}. Start backend and retry. Error: $e',
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
     await _localDb.initialize();
     await _localDb.saveChild(child);
-    await SyncService(_localDb).syncPendingData();
     if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Child saved to PostgreSQL ecd_data'),
+        backgroundColor: Colors.green,
+      ),
+    );
 
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(

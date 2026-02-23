@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:my_first_app/services/referral_api_service.dart';
 
 class ReferralStatusTrackerScreen extends StatefulWidget {
@@ -66,11 +65,13 @@ class _ReferralStatusTrackerScreenState
             ? DateTime.now().toString().split(' ')[0]
             : null,
       );
+      if (!mounted) return;
       setState(() => _isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Status updated to $newStatus')),
       );
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _errorMessage = e.toString();
         _isLoading = false;
@@ -85,11 +86,13 @@ class _ReferralStatusTrackerScreenState
     try {
       setState(() => _isLoading = true);
       await _viewModel.escalate();
+      if (!mounted) return;
       setState(() => _isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Referral escalated successfully')),
       );
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _errorMessage = e.toString();
         _isLoading = false;
@@ -429,9 +432,11 @@ class _ReferralStatusTrackerScreenState
           child: Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              border: Border.left(
-                color: Colors.blue,
-                width: 4,
+              border: const Border(
+                left: BorderSide(
+                  color: Colors.blue,
+                  width: 4,
+                ),
               ),
               color: Colors.grey[50],
             ),

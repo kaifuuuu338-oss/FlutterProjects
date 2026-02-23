@@ -15,7 +15,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await ProblemALmsService.instance.initialize();
 
-  // Initialize local database (Hive) - skip on web
+  // Initialize local app cache - skip on web
   if (!kIsWeb) {
     final localDb = LocalDBService();
     await localDb.initialize();

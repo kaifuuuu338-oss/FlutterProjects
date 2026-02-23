@@ -36,15 +36,10 @@ class SyncService {
     }
 
     try {
+      // Child registration is local-only. Clear any legacy unsynced markers.
       List<ChildModel> unsyncedChildren = _localDBService.getUnsyncedChildren();
       for (var child in unsyncedChildren) {
-        try {
-          await _apiService.registerChild(child);
-          await _localDBService.markChildSynced(child.childId);
-          print('Child ${child.childId} synced successfully.');
-        } catch (e) {
-          print('Error syncing child ${child.childId}: $e');
-        }
+        await _localDBService.markChildSynced(child.childId);
       }
 
       List<ScreeningModel> unsyncedScreenings = _localDBService.getUnsyncedScreenings();

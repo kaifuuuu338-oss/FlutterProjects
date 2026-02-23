@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:dio/dio.dart';
 
 class ReferralDecisionScreen extends StatefulWidget {
   final String childId;
-  final String? baseUrl;
+  final String baseUrl;
 
   const ReferralDecisionScreen({
     super.key,
@@ -234,9 +233,11 @@ class _ReferralDecisionScreenState extends State<ReferralDecisionScreen> {
                 margin: const EdgeInsets.only(bottom: 16),
                 decoration: BoxDecoration(
                   color: Colors.red[50],
-                  border: Border.left(
-                    color: Colors.red,
-                    width: 4,
+                  border: const Border(
+                    left: BorderSide(
+                      color: Colors.red,
+                      width: 4,
+                    ),
                   ),
                 ),
                 child: Row(

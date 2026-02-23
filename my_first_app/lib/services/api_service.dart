@@ -40,6 +40,28 @@ class APIService {
     );
   }
 
+  String _formatDioError(DioException error) {
+    final statusCode = error.response?.statusCode;
+    final responseData = error.response?.data;
+
+    String? detail;
+    if (responseData is Map<String, dynamic>) {
+      detail = responseData['detail']?.toString() ??
+          responseData['message']?.toString() ??
+          responseData['error']?.toString();
+    } else if (responseData is String && responseData.trim().isNotEmpty) {
+      detail = responseData.trim();
+    }
+
+    if (statusCode != null && detail != null && detail.isNotEmpty) {
+      return 'HTTP $statusCode: $detail';
+    }
+    if (statusCode != null) {
+      return 'HTTP $statusCode';
+    }
+    return error.message ?? 'Network error';
+  }
+
   Future<Response<dynamic>> _retry(RequestOptions requestOptions) async {
     final options = Options(
       method: requestOptions.method,
@@ -82,6 +104,21 @@ class APIService {
     }
   }
 
+  /// Register AWW (Anganwadi Worker) to PostgreSQL database
+  Future<Map<String, dynamic>> registerAWW(
+    Map<String, dynamic> awwData,
+  ) async {
+    try {
+      final response = await _dio.post(
+        '/auth/register',  // Backend endpoint for AWW registration
+        data: awwData,
+      );
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw Exception('AWW registration failed: ${_formatDioError(e)}');
+    }
+  }
+
   /// Submit screening
   Future<Map<String, dynamic>> submitScreening(
     Map<String, dynamic> screeningData,
@@ -98,25 +135,41 @@ class APIService {
   }
 
   /// Register/upsert child profile in backend source DB.
-  Future<Map<String, dynamic>> registerChild(ChildModel child) async {
+  Future<Map<String, dynamic>> registerChild(
+    ChildModel child, {
+    String assessmentCycle = 'Baseline',
+  }) async {
+    final dobIso = child.dateOfBirth.toIso8601String().split('T')[0];
+    final fastApiPayload = {
+      'child_id': child.childId,
+      'child_name': child.childName,
+      'gender': child.gender,
+      'age_months': child.ageMonths,
+      'date_of_birth': dobIso,
+      'dob': dobIso,
+      'awc_id': child.awcCode,
+      'awc_code': child.awcCode,
+      'sector_id': '',
+      'mandal_id': child.mandal,
+      'mandal': child.mandal,
+      'district_id': child.district,
+      'district': child.district,
+      'assessment_cycle': assessmentCycle,
+      'village': child.address ?? '',
+      'parent_name': child.parentName,
+      'parent_mobile': child.parentMobile,
+      'created_at': child.createdAt.toIso8601String(),
+      'updated_at': child.updatedAt.toIso8601String(),
+    };
+
     try {
       final response = await _dio.post(
         AppConstants.childRegisterEndpoint,
-        data: {
-          'child_id': child.childId,
-          'child_name': child.childName,
-          'gender': child.gender,
-          'age_months': child.ageMonths,
-          'awc_id': child.awcCode,
-          'sector_id': '',
-          'mandal_id': child.mandal,
-          'district_id': child.district,
-          'created_at': child.createdAt.toIso8601String(),
-        },
+        data: fastApiPayload,
       );
       return response.data as Map<String, dynamic>;
     } on DioException catch (e) {
-      throw Exception('Child registration sync failed: ${e.message}');
+      throw Exception('Child registration sync failed: ${_formatDioError(e)}');
     }
   }
 

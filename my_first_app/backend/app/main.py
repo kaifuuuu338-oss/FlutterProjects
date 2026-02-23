@@ -2,41 +2,51 @@ from __future__ import annotations
 
 import os
 import uuid
-import sqlite3
 from collections import Counter
 from datetime import datetime, date, timedelta
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-try:
+if __package__:
     from .model_service import load_artifacts, predict_risk
-except Exception:
-    # Allow running this file directly (python main.py) by falling back to
-    # importing from the local module name when package context is missing.
-    from model_service import load_artifacts, predict_risk
-try:
     from .intervention import generate_intervention, calculate_trend
-except Exception:
-    from intervention import generate_intervention, calculate_trend
-try:
     from .problem_b_service import ProblemBService
-except Exception:
+    from .pg_compat import get_conn
+else:
+    # Support running file directly: python main.py
+    from model_service import load_artifacts, predict_risk
+    from intervention import generate_intervention, calculate_trend
     from problem_b_service import ProblemBService
+    from pg_compat import get_conn
+
 try:
-    from .problem_b_activity_engine import (
-        assign_activities_for_child,
-        compute_compliance,
-        derive_severity,
-        determine_next_action,
-        escalation_decision,
-        plan_regeneration_summary,
-        projection_from_compliance,
-        reset_frequency_status,
-        weekly_progress_rows,
-    )
-except Exception:
+    if __package__:
+        from .problem_b_activity_engine import (
+            assign_activities_for_child,
+            compute_compliance,
+            derive_severity,
+            determine_next_action,
+            escalation_decision,
+            plan_regeneration_summary,
+            projection_from_compliance,
+            reset_frequency_status,
+            weekly_progress_rows,
+        )
+    else:
+        from problem_b_activity_engine import (
+            assign_activities_for_child,
+            compute_compliance,
+            derive_severity,
+            determine_next_action,
+            escalation_decision,
+            plan_regeneration_summary,
+            projection_from_compliance,
+            reset_frequency_status,
+            weekly_progress_rows,
+        )
+except ImportError:
     # Legacy module not required for problem_b_service - can be skipped
     assign_activities_for_child = None
     compute_compliance = None
@@ -48,6 +58,8 @@ except Exception:
     reset_frequency_status = None
     weekly_progress_rows = None
 
+DEFAULT_ECD_DATABASE_URL = "postgresql://postgres:postgres@127.0.0.1:5432/ecd_data"
+
 
 class LoginRequest(BaseModel):
     mobile_number: str
@@ -57,6 +69,15 @@ class LoginRequest(BaseModel):
 class LoginResponse(BaseModel):
     token: str
     user_id: str
+
+
+class RegistrationRequest(BaseModel):
+    name: str
+    mobile_number: str
+    password: str
+    awc_code: str
+    mandal: Optional[str] = None
+    district: Optional[str] = None
 
 
 class ScreeningRequest(BaseModel):
@@ -122,47 +143,87 @@ class ReferralEscalateRequest(BaseModel):
     worker_id: Optional[str] = None
 
 
-def _get_conn(db_path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    return conn
+class ChildRegisterRequest(BaseModel):
+    child_id: str
+    child_name: Optional[str] = None
+    gender: Optional[str] = None
+    age_months: Optional[int] = None
+    date_of_birth: Optional[str] = None
+    dob: Optional[str] = None
+    awc_id: Optional[str] = None
+    awc_code: Optional[str] = None
+    sector_id: Optional[str] = None
+    mandal_id: Optional[str] = None
+    mandal: Optional[str] = None
+    district_id: Optional[str] = None
+    district: Optional[str] = None
+    village: Optional[str] = None
+    assessment_cycle: Optional[str] = None
+    parent_name: Optional[str] = None
+    parent_mobile: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
-def _init_db(db_path: str) -> None:
-    with _get_conn(db_path) as conn:
-        conn.executescript(
+def _get_conn(db_url: str):
+    return get_conn(db_url)
+
+
+def _init_db(db_url: str) -> None:
+    with _get_conn(db_url) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS aww_profile (
+              aww_id TEXT PRIMARY KEY,
+              name TEXT,
+              mobile_number TEXT UNIQUE,
+              password TEXT,
+              awc_code TEXT,
+              mandal TEXT,
+              district TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        conn.execute(
             """
             CREATE TABLE IF NOT EXISTS child_profile (
               child_id TEXT PRIMARY KEY,
-              child_name TEXT,
-              gender TEXT,
-              age_months INTEGER,
-              village TEXT,
-              awc_id TEXT,
-              sector_id TEXT,
-              mandal_id TEXT,
-              district_id TEXT,
-              created_at TEXT
-            );
-
+              dob TEXT,
+              awc_code TEXT,
+              district TEXT,
+              mandal TEXT,
+              assessment_cycle TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS screening_event (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              id BIGSERIAL PRIMARY KEY,
               child_id TEXT,
               age_months INTEGER,
               overall_risk TEXT,
               explainability TEXT,
               assessment_cycle TEXT,
               created_at TEXT
-            );
-
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS screening_domain_score (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              screening_id INTEGER,
+              id BIGSERIAL PRIMARY KEY,
+              screening_id BIGINT,
               domain TEXT,
               risk_label TEXT,
-              score REAL
-            );
-
+              score DOUBLE PRECISION
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS referral_action (
               referral_id TEXT PRIMARY KEY,
               child_id TEXT,
@@ -173,29 +234,38 @@ def _init_db(db_path: str) -> None:
               referral_status TEXT,
               referral_date TEXT,
               completion_date TEXT
-            );
-
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS referral_status_history (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              id BIGSERIAL PRIMARY KEY,
               referral_id TEXT,
               old_status TEXT,
               new_status TEXT,
               changed_on TEXT,
               worker_id TEXT
-            );
-
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS followup_outcome (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              id BIGSERIAL PRIMARY KEY,
               child_id TEXT,
               baseline_delay_months INTEGER,
               followup_delay_months INTEGER,
               improvement_status TEXT,
               followup_completed INTEGER,
               followup_date TEXT
-            );
-
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS follow_up_activities (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              id BIGSERIAL PRIMARY KEY,
               referral_id TEXT,
               target_user TEXT,
               domain TEXT,
@@ -204,34 +274,43 @@ def _init_db(db_path: str) -> None:
               frequency TEXT,
               duration_days INTEGER,
               created_on TEXT
-            );
-
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS follow_up_log (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              id BIGSERIAL PRIMARY KEY,
               referral_id TEXT,
-              activity_id INTEGER,
+              activity_id BIGINT,
               completed INTEGER DEFAULT 0,
               completed_on TEXT,
               remarks TEXT
-            );
+            )
             """
         )
-        cols = [r["name"] for r in conn.execute("PRAGMA table_info(referral_action)").fetchall()]
-        if "appointment_date" not in cols:
-            conn.execute("ALTER TABLE referral_action ADD COLUMN appointment_date TEXT")
-        if "followup_deadline" not in cols:
-            conn.execute("ALTER TABLE referral_action ADD COLUMN followup_deadline TEXT")
-        if "escalation_level" not in cols:
-            conn.execute("ALTER TABLE referral_action ADD COLUMN escalation_level INTEGER")
-        if "escalated_to" not in cols:
-            conn.execute("ALTER TABLE referral_action ADD COLUMN escalated_to TEXT")
-        if "last_updated" not in cols:
-            conn.execute("ALTER TABLE referral_action ADD COLUMN last_updated TEXT")
-        child_cols = [r["name"] for r in conn.execute("PRAGMA table_info(child_profile)").fetchall()]
-        if "child_name" not in child_cols:
-            conn.execute("ALTER TABLE child_profile ADD COLUMN child_name TEXT")
-        if "village" not in child_cols:
-            conn.execute("ALTER TABLE child_profile ADD COLUMN village TEXT")
+        conn.execute("ALTER TABLE referral_action ADD COLUMN IF NOT EXISTS appointment_date TEXT")
+        conn.execute("ALTER TABLE referral_action ADD COLUMN IF NOT EXISTS followup_deadline TEXT")
+        conn.execute("ALTER TABLE referral_action ADD COLUMN IF NOT EXISTS escalation_level INTEGER")
+        conn.execute("ALTER TABLE referral_action ADD COLUMN IF NOT EXISTS escalated_to TEXT")
+        conn.execute("ALTER TABLE referral_action ADD COLUMN IF NOT EXISTS last_updated TEXT")
+
+        # Keep child_profile compatible with both old schema and current UI fields.
+        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS child_name TEXT")
+        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS gender TEXT")
+        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS age_months INTEGER")
+        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS village TEXT")
+        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS awc_id TEXT")
+        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS awc_code TEXT")
+        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS sector_id TEXT")
+        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS mandal_id TEXT")
+        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS mandal TEXT")
+        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS district_id TEXT")
+        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS district TEXT")
+        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS dob DATE")
+        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS assessment_cycle TEXT")
+        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS created_at TEXT")
+        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS updated_at TEXT")
 
 
 def _risk_rank(label: str) -> int:
@@ -289,17 +368,26 @@ def _save_screening(db_path: str, payload: ScreeningRequest, result: ScreeningRe
     with _get_conn(db_path) as conn:
         conn.execute(
             """
-            INSERT INTO child_profile(child_id, child_name, gender, age_months, village, awc_id, sector_id, mandal_id, district_id, created_at)
-            VALUES(?,?,?,?,?,?,?,?,?,?)
+            INSERT INTO child_profile(
+              child_id, child_name, gender, age_months, village,
+              awc_id, awc_code, sector_id, mandal_id, mandal, district_id, district,
+              assessment_cycle, created_at, updated_at
+            )
+            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             ON CONFLICT(child_id) DO UPDATE SET
               child_name=COALESCE(NULLIF(excluded.child_name, ''), child_profile.child_name),
               gender=COALESCE(NULLIF(excluded.gender, ''), child_profile.gender),
               age_months=excluded.age_months,
               village=COALESCE(NULLIF(excluded.village, ''), child_profile.village),
               awc_id=COALESCE(NULLIF(excluded.awc_id, ''), child_profile.awc_id),
+              awc_code=COALESCE(NULLIF(excluded.awc_code, ''), child_profile.awc_code),
               sector_id=COALESCE(NULLIF(excluded.sector_id, ''), child_profile.sector_id),
               mandal_id=COALESCE(NULLIF(excluded.mandal_id, ''), child_profile.mandal_id),
-              district_id=COALESCE(NULLIF(excluded.district_id, ''), child_profile.district_id)
+              mandal=COALESCE(NULLIF(excluded.mandal, ''), child_profile.mandal),
+              district_id=COALESCE(NULLIF(excluded.district_id, ''), child_profile.district_id),
+              district=COALESCE(NULLIF(excluded.district, ''), child_profile.district),
+              assessment_cycle=COALESCE(NULLIF(excluded.assessment_cycle, ''), child_profile.assessment_cycle),
+              updated_at=excluded.updated_at
             """,
             (
                 payload.child_id,
@@ -308,16 +396,22 @@ def _save_screening(db_path: str, payload: ScreeningRequest, result: ScreeningRe
                 payload.age_months,
                 payload.village or "",
                 payload.awc_id or "",
+                payload.awc_id or "",
                 payload.sector_id or "",
                 payload.mandal or "",
+                payload.mandal or "",
                 payload.district or "",
+                payload.district or "",
+                payload.assessment_cycle or "Baseline",
+                created_at,
                 created_at,
             ),
         )
         cur = conn.execute(
             """
             INSERT INTO screening_event(child_id, age_months, overall_risk, explainability, assessment_cycle, created_at)
-            VALUES(?,?,?,?,?,?)
+            VALUES(%s,%s,%s,%s,%s,%s)
+            RETURNING id
             """,
             (
                 payload.child_id,
@@ -328,12 +422,13 @@ def _save_screening(db_path: str, payload: ScreeningRequest, result: ScreeningRe
                 created_at,
             ),
         )
-        screening_id = cur.lastrowid
+        screening_row = cur.fetchone()
+        screening_id = int(screening_row["id"]) if screening_row else 0
         for domain, risk in result.domain_scores.items():
             conn.execute(
                 """
                 INSERT INTO screening_domain_score(screening_id, domain, risk_label, score)
-                VALUES(?,?,?,?)
+                VALUES(%s,%s,%s,%s)
                 """,
                 (screening_id, domain, _normalize_risk(risk), _risk_score(risk)),
             )
@@ -343,7 +438,7 @@ def _save_screening(db_path: str, payload: ScreeningRequest, result: ScreeningRe
         existing = conn.execute(
             """
             SELECT id FROM followup_outcome
-            WHERE child_id=?
+            WHERE child_id=%s
             ORDER BY id DESC
             LIMIT 1
             """,
@@ -353,7 +448,7 @@ def _save_screening(db_path: str, payload: ScreeningRequest, result: ScreeningRe
             conn.execute(
                 """
                 INSERT INTO followup_outcome(child_id, baseline_delay_months, followup_delay_months, improvement_status, followup_completed, followup_date)
-                VALUES(?,?,?,?,?,?)
+                VALUES(%s,%s,%s,%s,%s,%s)
                 """,
                 (
                     payload.child_id,
@@ -467,7 +562,7 @@ def _escalation_target(level: int) -> str:
 
 
 def _apply_overdue_escalation(
-    conn: sqlite3.Connection,
+    conn: Any,
     *,
     referral_id: str,
     status: str,
@@ -490,10 +585,10 @@ def _apply_overdue_escalation(
     conn.execute(
         """
         UPDATE referral_action
-        SET escalation_level = ?,
-            followup_deadline = ?,
-            last_updated = ?
-        WHERE referral_id = ?
+        SET escalation_level = %s,
+            followup_deadline = %s,
+            last_updated = %s
+        WHERE referral_id = %s
         """,
         (level, new_deadline.isoformat(), today.isoformat(), referral_id),
     )
@@ -531,7 +626,7 @@ def _create_referral_action(
                 escalated_to,
                 last_updated
             )
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             """,
             (
                 referral_id,
@@ -573,21 +668,21 @@ def _compute_monitoring(db_path: str, role: str, location_id: str) -> dict:
         child_map = {c["child_id"]: dict(c) for c in children}
 
         screenings = conn.execute("SELECT * FROM screening_event ORDER BY created_at DESC, id DESC").fetchall()
-        latest_screen_by_child: Dict[str, sqlite3.Row] = {}
+        latest_screen_by_child: Dict[str, Dict[str, Any]] = {}
         for s in screenings:
             cid = s["child_id"]
             if cid in child_map and cid not in latest_screen_by_child:
                 latest_screen_by_child[cid] = s
 
         latest_ids = [row["id"] for row in latest_screen_by_child.values()]
-        domain_rows: List[sqlite3.Row] = []
+        domain_rows: List[Dict[str, Any]] = []
         if latest_ids:
-            placeholders = ",".join("?" for _ in latest_ids)
+            placeholders = ",".join("%s" for _ in latest_ids)
             domain_rows = conn.execute(
                 f"SELECT * FROM screening_domain_score WHERE screening_id IN ({placeholders})",
                 tuple(latest_ids),
             ).fetchall()
-        domain_rows_by_screen: Dict[int, List[sqlite3.Row]] = {}
+        domain_rows_by_screen: Dict[int, List[Dict[str, Any]]] = {}
         for row in domain_rows:
             domain_rows_by_screen.setdefault(int(row["screening_id"]), []).append(row)
 
@@ -644,11 +739,11 @@ def _compute_monitoring(db_path: str, role: str, location_id: str) -> dict:
                     }
                 )
 
-        latest_referral_by_child: Dict[str, sqlite3.Row] = {}
+        latest_referral_by_child: Dict[str, Dict[str, Any]] = {}
         for r in sorted(referrals, key=lambda x: (x["referral_date"] or "", x["referral_id"] or ""), reverse=True):
             if r["child_id"] not in latest_referral_by_child:
                 latest_referral_by_child[r["child_id"]] = r
-        latest_followup_by_child: Dict[str, sqlite3.Row] = {}
+        latest_followup_by_child: Dict[str, Dict[str, Any]] = {}
         for f in sorted(followups, key=lambda x: (x["followup_date"] or "", x["id"] or 0), reverse=True):
             if f["child_id"] not in latest_followup_by_child:
                 latest_followup_by_child[f["child_id"]] = f
@@ -871,7 +966,7 @@ def _compute_impact(db_path: str, role: str, location_id: str) -> dict:
     where_clause = ""
     params: tuple = ()
     if column and location_id:
-        where_clause = f" WHERE c.{column} = ? "
+        where_clause = f" WHERE c.{column} = %s "
         params = (location_id,)
     with _get_conn(db_path) as conn:
         children = conn.execute("SELECT * FROM child_profile").fetchall()
@@ -882,7 +977,7 @@ def _compute_impact(db_path: str, role: str, location_id: str) -> dict:
         rows = conn.execute("SELECT * FROM followup_outcome").fetchall()
         rows = [r for r in rows if r["child_id"] in child_map]
         screenings = conn.execute("SELECT * FROM screening_event ORDER BY created_at ASC, id ASC").fetchall()
-        by_child: Dict[str, List[sqlite3.Row]] = {}
+        by_child: Dict[str, List[Dict[str, Any]]] = {}
         for s in screenings:
             if s["child_id"] in child_map:
                 by_child.setdefault(s["child_id"], []).append(s)
@@ -1061,7 +1156,7 @@ def _generate_follow_up_activities(db_path: str, referral_id: str, child_id: str
                 INSERT INTO follow_up_activities (
                     referral_id, target_user, domain, activity_title,
                     activity_description, frequency, duration_days, created_on
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     activity["referral_id"],
@@ -1107,10 +1202,17 @@ def create_app() -> FastAPI:
     except Exception as exc:
         model_load_error = str(exc)
     db_path = os.getenv(
-        "ECD_DATA_DB",
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "ecd_data.db")),
+        "ECD_DATABASE_URL",
+        os.getenv("DATABASE_URL", DEFAULT_ECD_DATABASE_URL),
     )
-    _init_db(db_path)
+    try:
+        _init_db(db_path)
+    except Exception as exc:
+        raise RuntimeError(
+            "Database initialization failed. Set ECD_DATABASE_URL (or DATABASE_URL) "
+            "to a reachable PostgreSQL database, for example "
+            "'postgresql://<user>:<password>@127.0.0.1:5432/ecd_data'."
+        ) from exc
     # Simple in-memory store for tasks/checklists (child_id -> data)
     tasks_store: Dict[str, Dict] = {}
     # In-memory activity assignment + tracking store for Problem B engine
@@ -1178,6 +1280,155 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="Password is required")
         token = f"demo_jwt_{uuid.uuid4().hex}"
         return LoginResponse(token=token, user_id=f"aww_{payload.mobile_number}")
+
+    @app.post("/auth/register")
+    def register_aww(payload: RegistrationRequest) -> dict:
+        """Register a new AWW (Anganwadi Worker) to PostgreSQL database."""
+        try:
+            if not payload.name.strip():
+                raise HTTPException(status_code=400, detail="Name is required")
+            if len(payload.mobile_number.strip()) != 10 or not payload.mobile_number.strip().isdigit():
+                raise HTTPException(status_code=400, detail="Invalid mobile number - must be 10 digits")
+            if not payload.password.strip():
+                raise HTTPException(status_code=400, detail="Password is required")
+            if not payload.awc_code.strip():
+                raise HTTPException(status_code=400, detail="AWC code is required")
+
+            aww_id = f"aww_{payload.mobile_number}"
+            created_at = datetime.utcnow().isoformat()
+            updated_at = datetime.utcnow().isoformat()
+
+            # Insert into PostgreSQL ecd_data.aww_profile
+            with get_conn(db_path) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO aww_profile(
+                      aww_id, name, mobile_number, password, awc_code, 
+                      mandal, district, created_at, updated_at
+                    )
+                    VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT(mobile_number) DO UPDATE SET
+                      name=EXCLUDED.name,
+                      password=EXCLUDED.password,
+                      awc_code=EXCLUDED.awc_code,
+                      mandal=EXCLUDED.mandal,
+                      district=EXCLUDED.district,
+                      updated_at=EXCLUDED.updated_at
+                    """,
+                    (
+                        aww_id,
+                        payload.name.strip(),
+                        payload.mobile_number.strip(),
+                        payload.password,
+                        payload.awc_code.strip(),
+                        payload.mandal or "",
+                        payload.district or "",
+                        created_at,
+                        updated_at,
+                    ),
+                )
+            
+            return {
+                "status": "ok",
+                "message": "AWW registered successfully",
+                "aww_id": aww_id,
+                "created_at": created_at,
+            }
+        except Exception as exc:
+            print(f"❌ Registration error: {exc}")
+            raise HTTPException(status_code=500, detail=f"Registration failed: {str(exc)}")
+
+    @app.post("/children/register")
+    def register_child(payload: ChildRegisterRequest) -> dict:
+        """Register child profile to PostgreSQL ecd_data.child_profile table."""
+        child_id = (payload.child_id or "").strip()
+        if not child_id:
+            raise HTTPException(status_code=400, detail="child_id is required")
+
+        dob = (payload.date_of_birth or payload.dob or "").strip() or None
+        awc_code = (payload.awc_id or payload.awc_code or "").strip() or "AWS_DEMO_001"
+        district = (payload.district_id or payload.district or "").strip() or ""
+        mandal = (payload.mandal_id or payload.mandal or "").strip() or ""
+        assessment_cycle = (payload.assessment_cycle or "Baseline").strip()
+
+        try:
+            with _get_conn(db_path) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO child_profile(
+                      child_id, dob, awc_code, district, mandal, assessment_cycle
+                    )
+                    VALUES(%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT(child_id) DO UPDATE SET
+                      dob=EXCLUDED.dob,
+                      awc_code=EXCLUDED.awc_code,
+                      district=EXCLUDED.district,
+                      mandal=EXCLUDED.mandal,
+                      assessment_cycle=EXCLUDED.assessment_cycle
+                    """,
+                    (
+                        child_id,
+                        dob,
+                        awc_code,
+                        district,
+                        mandal,
+                        assessment_cycle,
+                    ),
+                )
+
+                row = conn.execute(
+                    """
+                    SELECT child_id, dob, awc_code, district, mandal, assessment_cycle
+                    FROM child_profile
+                    WHERE child_id = %s
+                    LIMIT 1
+                    """,
+                    (child_id,),
+                ).fetchone()
+
+            return {
+                "status": "ok",
+                "message": "Child profile registered successfully",
+                "child": dict(row) if row else {"child_id": child_id}
+            }
+        except Exception as exc:
+            print(f"❌ Child registration error: {exc}")
+            raise HTTPException(status_code=500, detail=f"Child registration failed: {str(exc)}")
+
+    @app.get("/children/{child_id}")
+    def get_child(child_id: str) -> dict:
+        with _get_conn(db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT child_id, child_name, gender, age_months, dob,
+                       awc_id, awc_code, mandal_id, mandal, district_id, district,
+                       assessment_cycle, created_at, updated_at
+                FROM child_profile
+                WHERE child_id = %s
+                LIMIT 1
+                """,
+                (child_id,),
+            ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Child not found")
+        return dict(row)
+
+    @app.get("/children")
+    def list_children(limit: int = 200) -> dict:
+        safe_limit = max(1, min(limit, 1000))
+        with _get_conn(db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT child_id, child_name, gender, age_months, dob,
+                       awc_id, awc_code, mandal_id, mandal, district_id, district,
+                       assessment_cycle, created_at, updated_at
+                FROM child_profile
+                ORDER BY created_at DESC, child_id DESC
+                LIMIT %s
+                """,
+                (safe_limit,),
+            ).fetchall()
+        return {"count": len(rows), "items": [dict(r) for r in rows]}
 
     @app.post("/screening/submit", response_model=ScreeningResponse)
     def submit_screening(payload: ScreeningRequest) -> ScreeningResponse:
@@ -1267,7 +1518,7 @@ def create_app() -> FastAPI:
                     escalated_to,
                     last_updated
                 )
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+                VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """,
                 (
                     referral_id,
@@ -1311,7 +1562,7 @@ def create_app() -> FastAPI:
                 SELECT referral_id, child_id, aww_id, referral_type, urgency, referral_status,
                        referral_date, followup_deadline, escalation_level, escalated_to, last_updated
                 FROM referral_action
-                WHERE child_id = ?
+                WHERE child_id = %s
                 ORDER BY referral_date DESC, referral_id DESC
                 LIMIT 1
                 """,
@@ -1321,7 +1572,7 @@ def create_app() -> FastAPI:
                 """
                 SELECT overall_risk
                 FROM screening_event
-                WHERE child_id = ?
+                WHERE child_id = %s
                 ORDER BY created_at DESC, id DESC
                 LIMIT 1
                 """,
@@ -1382,7 +1633,7 @@ def create_app() -> FastAPI:
                        referral_date, completion_date, appointment_date, followup_deadline,
                        escalation_level, escalated_to, last_updated
                 FROM referral_action
-                WHERE child_id = ?
+                WHERE child_id = %s
                 ORDER BY referral_date DESC, referral_id DESC
                 LIMIT 1
                 """,
@@ -1395,7 +1646,7 @@ def create_app() -> FastAPI:
                 """
                 SELECT child_id, child_name, gender, age_months, village, awc_id
                 FROM child_profile
-                WHERE child_id = ?
+                WHERE child_id = %s
                 LIMIT 1
                 """,
                 (child_id,),
@@ -1404,7 +1655,7 @@ def create_app() -> FastAPI:
                 """
                 SELECT id, overall_risk, explainability
                 FROM screening_event
-                WHERE child_id = ?
+                WHERE child_id = %s
                 ORDER BY created_at DESC, id DESC
                 LIMIT 1
                 """,
@@ -1416,7 +1667,7 @@ def create_app() -> FastAPI:
                     """
                     SELECT domain, risk_label
                     FROM screening_domain_score
-                    WHERE screening_id = ?
+                    WHERE screening_id = %s
                     """,
                     (screen["id"],),
                 ).fetchall()
@@ -1795,7 +2046,7 @@ def create_app() -> FastAPI:
         today = _today_iso()
         with _get_conn(db_path) as conn:
             row = conn.execute(
-                "SELECT referral_id, referral_status FROM referral_action WHERE referral_id = ? LIMIT 1",
+                "SELECT referral_id, referral_status FROM referral_action WHERE referral_id = %s LIMIT 1",
                 (referral_id,),
             ).fetchone()
             if row is None:
@@ -1810,7 +2061,7 @@ def create_app() -> FastAPI:
             followup_deadline = None
             if status == "Missed":
                 current = conn.execute(
-                    "SELECT escalation_level FROM referral_action WHERE referral_id = ?",
+                    "SELECT escalation_level FROM referral_action WHERE referral_id = %s",
                     (referral_id,),
                 ).fetchone()
                 level = int(current["escalation_level"] or 0) + 1 if current else 1
@@ -1821,13 +2072,13 @@ def create_app() -> FastAPI:
             conn.execute(
                 """
                 UPDATE referral_action
-                SET referral_status = ?,
-                    completion_date = COALESCE(?, completion_date),
-                    appointment_date = COALESCE(?, appointment_date),
-                    followup_deadline = COALESCE(?, followup_deadline),
-                    escalation_level = COALESCE(?, escalation_level),
-                    last_updated = ?
-                WHERE referral_id = ?
+                SET referral_status = %s,
+                    completion_date = COALESCE(%s, completion_date),
+                    appointment_date = COALESCE(%s, appointment_date),
+                    followup_deadline = COALESCE(%s, followup_deadline),
+                    escalation_level = COALESCE(%s, escalation_level),
+                    last_updated = %s
+                WHERE referral_id = %s
                 """,
                 (
                     status,
@@ -1844,7 +2095,7 @@ def create_app() -> FastAPI:
                 INSERT INTO referral_status_history(
                     referral_id, old_status, new_status, changed_on, worker_id
                 )
-                VALUES(?,?,?,?,?)
+                VALUES(%s,%s,%s,%s,%s)
                 """,
                 (
                     referral_id,
@@ -1882,7 +2133,7 @@ def create_app() -> FastAPI:
                 """
                 SELECT escalation_level, referral_status
                 FROM referral_action
-                WHERE referral_id = ?
+                WHERE referral_id = %s
                 """,
                 (referral_id,),
             ).fetchone()
@@ -1894,11 +2145,11 @@ def create_app() -> FastAPI:
             conn.execute(
                 """
                 UPDATE referral_action
-                SET escalation_level = ?,
-                    escalated_to = ?,
-                    followup_deadline = ?,
-                    last_updated = ?
-                WHERE referral_id = ?
+                SET escalation_level = %s,
+                    escalated_to = %s,
+                    followup_deadline = %s,
+                    last_updated = %s
+                WHERE referral_id = %s
                 """,
                 (level, escalated_to, new_deadline, today, referral_id),
             )
@@ -1917,7 +2168,7 @@ def create_app() -> FastAPI:
                 """
                 SELECT id, referral_id, old_status, new_status, changed_on, worker_id
                 FROM referral_status_history
-                WHERE referral_id = ?
+                WHERE referral_id = %s
                 ORDER BY changed_on DESC, id DESC
                 """,
                 (referral_id,),
@@ -1950,7 +2201,7 @@ def create_app() -> FastAPI:
                        referral_status, referral_date, followup_deadline,
                        escalation_level, escalated_to
                 FROM referral_action
-                WHERE referral_id = ?
+                WHERE referral_id = %s
                 """,
                 (referral_id,),
             ).fetchone()
@@ -1964,7 +2215,7 @@ def create_app() -> FastAPI:
                 SELECT id, referral_id, target_user, domain, activity_title,
                        activity_description, frequency, duration_days, created_on
                 FROM follow_up_activities
-                WHERE referral_id = ?
+                WHERE referral_id = %s
                 ORDER BY target_user, domain
                 """,
                 (referral_id,),
@@ -1975,7 +2226,7 @@ def create_app() -> FastAPI:
                 """
                 SELECT activity_id, completed, completed_on, remarks
                 FROM follow_up_log
-                WHERE referral_id = ?
+                WHERE referral_id = %s
                 ORDER BY completed_on DESC
                 """,
                 (referral_id,),
@@ -2037,7 +2288,7 @@ def create_app() -> FastAPI:
             activity = conn.execute(
                 """
                 SELECT id FROM follow_up_activities
-                WHERE id = ? AND referral_id = ?
+                WHERE id = %s AND referral_id = %s
                 """,
                 (activity_id, referral_id),
             ).fetchone()
@@ -2050,7 +2301,7 @@ def create_app() -> FastAPI:
                 """
                 INSERT INTO follow_up_log (
                     referral_id, activity_id, completed, completed_on, remarks
-                ) VALUES (?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s)
                 """,
                 (referral_id, activity_id, 1, today, payload.remarks or ""),
             )
@@ -2069,7 +2320,7 @@ def create_app() -> FastAPI:
             total = conn.execute(
                 """
                 SELECT COUNT(*) as cnt FROM follow_up_activities
-                WHERE referral_id = ?
+                WHERE referral_id = %s
                 """,
                 (referral_id,),
             ).fetchone()["cnt"]
@@ -2078,7 +2329,7 @@ def create_app() -> FastAPI:
             completed = conn.execute(
                 """
                 SELECT COUNT(DISTINCT activity_id) as cnt FROM follow_up_log
-                WHERE referral_id = ? AND completed = 1
+                WHERE referral_id = %s AND completed = 1
                 """,
                 (referral_id,),
             ).fetchone()["cnt"]
@@ -2104,7 +2355,7 @@ def create_app() -> FastAPI:
                 """
                 SELECT referral_id, escalation_level, referral_status
                 FROM referral_action
-                WHERE followup_deadline < ? AND referral_status != 'Completed'
+                WHERE followup_deadline < %s AND referral_status != 'Completed'
                 """,
                 (today.isoformat(),),
             ).fetchall()
@@ -2120,11 +2371,11 @@ def create_app() -> FastAPI:
                 conn.execute(
                     """
                     UPDATE referral_action
-                    SET escalation_level = ?,
-                        escalated_to = ?,
-                        followup_deadline = ?,
-                        last_updated = ?
-                    WHERE referral_id = ?
+                    SET escalation_level = %s,
+                        escalated_to = %s,
+                        followup_deadline = %s,
+                        last_updated = %s
+                    WHERE referral_id = %s
                     """,
                     (new_level, escalated_to, new_deadline, today.isoformat(), referral_id),
                 )
@@ -2134,7 +2385,7 @@ def create_app() -> FastAPI:
                     """
                     INSERT INTO referral_status_history (
                         referral_id, old_status, new_status, changed_on, worker_id
-                    ) VALUES (?, ?, ?, ?, ?)
+                    ) VALUES (%s, %s, %s, %s, %s)
                     """,
                     (
                         referral_id,
@@ -2242,7 +2493,7 @@ def create_app() -> FastAPI:
                 cursor.execute(
                     """
                     SELECT activity_id, role FROM activities
-                    WHERE phase_id = ?
+                    WHERE phase_id = %s
                     ORDER BY role, created_at ASC
                     """,
                     (phase_id,),
@@ -2261,7 +2512,7 @@ def create_app() -> FastAPI:
                         cursor.execute(
                             """
                             INSERT INTO task_logs(task_id, activity_id, date_logged, completed)
-                            VALUES (?, ?, ?, ?)
+                            VALUES (%s, %s, %s, %s)
                             """,
                             (task_id, activity_id, now, done),
                         )
@@ -2302,7 +2553,7 @@ def create_app() -> FastAPI:
                     """
                     SELECT activity_id, phase_id, domain, role, name, frequency_per_week, created_at
                     FROM activities
-                    WHERE phase_id = ?
+                    WHERE phase_id = %s
                     ORDER BY role, created_at ASC
                     """,
                     (phase_id,),
@@ -2326,7 +2577,7 @@ def create_app() -> FastAPI:
                     """
                     SELECT activity_id, phase_id, domain, role, name, frequency_per_week, created_at
                     FROM activities
-                    WHERE phase_id = ?
+                    WHERE phase_id = %s
                     ORDER BY role, created_at ASC
                     """,
                     (phase_id,),
@@ -2337,7 +2588,7 @@ def create_app() -> FastAPI:
                     """
                     SELECT review_id, phase_id, review_date, compliance, improvement, decision_action, decision_reason
                     FROM review_log
-                    WHERE phase_id = ?
+                    WHERE phase_id = %s
                     ORDER BY review_date DESC
                     """,
                     (phase_id,),
@@ -2349,7 +2600,7 @@ def create_app() -> FastAPI:
                     SELECT t.task_id, t.activity_id, t.date_logged, t.completed, a.role, a.name
                     FROM task_logs t
                     JOIN activities a ON a.activity_id = t.activity_id
-                    WHERE a.phase_id = ?
+                    WHERE a.phase_id = %s
                     ORDER BY t.date_logged DESC
                     LIMIT 200
                     """,
@@ -2399,11 +2650,14 @@ def create_app() -> FastAPI:
     def complete_intervention_phase(phase_id: str, payload: PlanClosureRequest):
         """Mark intervention phase as completed"""
         try:
-            db_path = "problem_b.db"
-            with _get_conn(db_path) as conn:
+            try:
+                from .problem_b_service import problem_b_service
+            except ImportError:
+                from problem_b_service import problem_b_service
+            with _get_conn(problem_b_service.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "UPDATE intervention_phase SET status = 'COMPLETED' WHERE phase_id = ?",
+                    "UPDATE intervention_phase SET status = 'COMPLETED' WHERE phase_id = %s",
                     (phase_id,),
                 )
                 if cursor.rowcount == 0:
@@ -2427,5 +2681,16 @@ app = create_app()
 
 if __name__ == "__main__":
     import uvicorn
+    from pathlib import Path
 
-    uvicorn.run("backend.app.main:app", host="127.0.0.1", port=8000, reload=True)
+    # Pick an import path that matches the current working directory.
+    cwd = Path.cwd()
+    if (cwd / "backend" / "app" / "main.py").exists():
+        app_path = "backend.app.main:app"
+    elif (cwd / "app" / "main.py").exists():
+        app_path = "app.main:app"
+    else:
+        app_path = "main:app"
+
+    uvicorn.run(app_path, host="127.0.0.1", port=8000, reload=True)
+

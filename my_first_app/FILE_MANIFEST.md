@@ -127,18 +127,18 @@ No schema modifications were needed.
 
 ### 1. Backend Deployment
 ```bash
-cd c:\manfoosah\FlutterProjects\my_first_app\backend
+cd c:\FlutterProjects\my_first_app\backend
 
 # Option A: Development (with hot reload)
-C:/manfoosah/.venv/Scripts/python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+C:/FlutterProjects/my_first_app/backend/.venv/Scripts/python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 
 # Option B: Production (no reload)
-C:/manfoosah/.venv/Scripts/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+C:/FlutterProjects/my_first_app/backend/.venv/Scripts/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
 ```
 
 ### 2. Frontend Deployment
 ```bash
-cd c:\manfoosah\FlutterProjects\my_first_app
+cd c:\FlutterProjects\my_first_app
 
 # Development
 flutter run -d chrome

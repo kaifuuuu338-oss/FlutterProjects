@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 
 class InterventionPlanDashboard extends StatefulWidget {
   final String childId;
@@ -18,12 +16,6 @@ class InterventionPlanDashboard extends StatefulWidget {
 }
 
 class _InterventionPlanDashboardState extends State<InterventionPlanDashboard> {
-  late Future<Map<String, dynamic>> _planData;
-  late Future<List<dynamic>> _activitiesData;
-  late Future<Map<String, dynamic>> _decisionData;
-
-  static const String apiUrl = 'http://127.0.0.1:8000';
-
   @override
   void initState() {
     super.initState();
@@ -35,49 +27,6 @@ class _InterventionPlanDashboardState extends State<InterventionPlanDashboard> {
     // This would be called when navigating to a specific plan
     // For now, we'll need the plan_id from navigation
     // State.of() and route parameters
-  }
-
-  Future<Map<String, dynamic>> _fetchPlanProgress(String planId) async {
-    try {
-      final response = await http.get(
-        Uri.parse('$apiUrl/intervention/$planId/progress'),
-      );
-      if (response.statusCode == 200) {
-        return json.decode(response.body);
-      }
-      throw Exception('Failed to load plan progress');
-    } catch (e) {
-      rethrow;
-    }
-  }
-
-  Future<List<dynamic>> _fetchActivities(String planId) async {
-    try {
-      final response = await http.get(
-        Uri.parse('$apiUrl/problem-b/activities/$widget.childId'),
-      );
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        return data['activities'] ?? [];
-      }
-      throw Exception('Failed to load activities');
-    } catch (e) {
-      rethrow;
-    }
-  }
-
-  Future<Map<String, dynamic>> _fetchLatestDecision(String planId) async {
-    try {
-      final response = await http.get(
-        Uri.parse('$apiUrl/intervention/$planId/decision'),
-      );
-      if (response.statusCode == 200) {
-        return json.decode(response.body);
-      }
-      throw Exception('Failed to load decision');
-    } catch (e) {
-      rethrow;
-    }
   }
 
   void _navigateToWeeklyProgress(String planId) {

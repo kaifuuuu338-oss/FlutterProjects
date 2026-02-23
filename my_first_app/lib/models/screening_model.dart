@@ -1,62 +1,32 @@
-import 'package:hive/hive.dart';
-
-part 'screening_model.g.dart';
-
-@HiveType(typeId: 1)
 enum RiskLevel {
-  @HiveField(0)
   low,
-  @HiveField(1)
   medium,
-  @HiveField(2)
   high,
-  @HiveField(3)
   critical,
 }
 
-@HiveType(typeId: 2)
 enum AssessmentType {
-  @HiveField(0)
   baseline,
-  @HiveField(1)
   followUp,
-  @HiveField(2)
   rescreen,
 }
 
-@HiveType(typeId: 3)
-class ScreeningModel extends HiveObject {
-  @HiveField(0)
+class ScreeningModel {
   final String screeningId;
-  @HiveField(1)
   final String childId;
-  @HiveField(2)
   final String awwId;
-  @HiveField(3)
   final AssessmentType assessmentType;
-  @HiveField(4)
   final int ageMonths;
-  @HiveField(5)
   final Map<String, List<int>> domainResponses;
-  @HiveField(6)
   final Map<String, double> domainScores;
-  @HiveField(7)
   final RiskLevel overallRisk;
-  @HiveField(8)
   final String explainability;
-  @HiveField(9)
   final int missedMilestones;
-  @HiveField(10)
   final int delayMonths;
-  @HiveField(11)
   final bool consentGiven;
-  @HiveField(12)
   final DateTime consentTimestamp;
-  @HiveField(13)
   final bool referralTriggered;
-  @HiveField(14)
   final DateTime screeningDate;
-  @HiveField(15)
   final DateTime? submittedAt;
 
   ScreeningModel({
