@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:my_first_app/core/localization/app_localizations.dart';
 import 'package:my_first_app/models/child_model.dart';
 import 'package:my_first_app/models/screening_model.dart';
@@ -14,12 +14,16 @@ class ConsentScreen extends StatefulWidget {
   final String childId;
   final int ageMonths;
   final String awwId;
+  final List<String> birthHistory;
+  final List<String> healthHistory;
 
   const ConsentScreen({
     super.key,
     required this.childId,
     required this.ageMonths,
     required this.awwId,
+    this.birthHistory = const [],
+    this.healthHistory = const [],
   });
 
   @override
@@ -40,6 +44,8 @@ class _ConsentScreenState extends State<ConsentScreen> {
           awwId: widget.awwId,
           consentGiven: true,
           consentTimestamp: DateTime.now(),
+          birthHistory: widget.birthHistory,
+          healthHistory: widget.healthHistory,
         ),
       ),
     );
@@ -85,9 +91,9 @@ class _ConsentScreenState extends State<ConsentScreen> {
     if (!mounted) return;
     final l10n = AppLocalizations.of(context);
     if (past.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.t('no_past_results'))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l10n.t('no_past_results'))));
       return;
     }
 
@@ -103,8 +109,14 @@ class _ConsentScreenState extends State<ConsentScreen> {
             ageMonths: s.ageMonths,
           );
           return ListTile(
-            title: Text('${s.childId} - ${l10n.t(risk.toLowerCase()).toUpperCase()}'),
-            subtitle: Text(l10n.t('date_label', {'date': s.screeningDate.toLocal().toString()})),
+            title: Text(
+              '${s.childId} - ${l10n.t(risk.toLowerCase()).toUpperCase()}',
+            ),
+            subtitle: Text(
+              l10n.t('date_label', {
+                'date': s.screeningDate.toLocal().toString(),
+              }),
+            ),
             trailing: const Icon(Icons.open_in_new),
             onTap: () {
               Navigator.of(context).pop();
@@ -140,7 +152,9 @@ class _ConsentScreenState extends State<ConsentScreen> {
     final low = all.where((s) => s.overallRisk == RiskLevel.low).length;
     final medium = all.where((s) => s.overallRisk == RiskLevel.medium).length;
     final high = all.where((s) => s.overallRisk == RiskLevel.high).length;
-    final critical = all.where((s) => s.overallRisk == RiskLevel.critical).length;
+    final critical = all
+        .where((s) => s.overallRisk == RiskLevel.critical)
+        .length;
 
     if (!mounted) return;
     final l10n = AppLocalizations.of(context);
@@ -159,14 +173,19 @@ class _ConsentScreenState extends State<ConsentScreen> {
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(l10n.t('ok'))),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(l10n.t('ok')),
+          ),
         ],
       ),
     );
   }
 
   void _openSettings() {
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
   }
 
   Widget _buildNavDrawer() {
@@ -175,12 +194,49 @@ class _ConsentScreenState extends State<ConsentScreen> {
       child: SafeArea(
         child: ListView(
           children: [
-            ListTile(title: Text(l10n.t('navigation'), style: const TextStyle(fontWeight: FontWeight.bold))),
-            ListTile(leading: const Icon(Icons.dashboard_outlined), title: Text(l10n.t('dashboard')), onTap: _goDashboard),
-            ListTile(leading: const Icon(Icons.people_outline), title: Text(l10n.t('children')), onTap: () { Navigator.of(context).pop(); _showChildrenCount(); }),
-            ListTile(leading: const Icon(Icons.dataset_outlined), title: Text(l10n.t('risk_status')), onTap: () { Navigator.of(context).pop(); _showRiskStatus(); }),
-            ListTile(leading: const Icon(Icons.query_stats_outlined), title: Text(l10n.t('view_past_results')), onTap: () { Navigator.of(context).pop(); _viewPastResults(); }),
-            ListTile(leading: const Icon(Icons.settings_outlined), title: Text(l10n.t('settings')), onTap: () { Navigator.of(context).pop(); _openSettings(); }),
+            ListTile(
+              title: Text(
+                l10n.t('navigation'),
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.dashboard_outlined),
+              title: Text(l10n.t('dashboard')),
+              onTap: _goDashboard,
+            ),
+            ListTile(
+              leading: const Icon(Icons.people_outline),
+              title: Text(l10n.t('children')),
+              onTap: () {
+                Navigator.of(context).pop();
+                _showChildrenCount();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.dataset_outlined),
+              title: Text(l10n.t('risk_status')),
+              onTap: () {
+                Navigator.of(context).pop();
+                _showRiskStatus();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.query_stats_outlined),
+              title: Text(l10n.t('view_past_results')),
+              onTap: () {
+                Navigator.of(context).pop();
+                _viewPastResults();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.settings_outlined),
+              title: Text(l10n.t('settings')),
+              onTap: () {
+                Navigator.of(context).pop();
+                _openSettings();
+              },
+            ),
           ],
         ),
       ),
@@ -199,7 +255,9 @@ class _ConsentScreenState extends State<ConsentScreen> {
             Container(
               height: 58,
               decoration: const BoxDecoration(
-                gradient: LinearGradient(colors: [Color(0xFF41B88E), Color(0xFF4CC29B)]),
+                gradient: LinearGradient(
+                  colors: [Color(0xFF41B88E), Color(0xFF4CC29B)],
+                ),
               ),
               padding: const EdgeInsets.symmetric(horizontal: 14),
               child: Row(
@@ -213,16 +271,30 @@ class _ConsentScreenState extends State<ConsentScreen> {
                       errorBuilder: (context, error, stackTrace) => Container(
                         width: 30,
                         height: 30,
-                        decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                        decoration: const BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                        ),
                         alignment: Alignment.center,
-                        child: const Text('AP', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF1976D2))),
+                        child: const Text(
+                          'AP',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF1976D2),
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                const SizedBox(width: 10),
+                  const SizedBox(width: 10),
                   Text(
                     AppLocalizations.of(context).t('govt_andhra_pradesh'),
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 20),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 20,
+                    ),
                   ),
                   const Spacer(),
                   const LanguageMenuButton(iconColor: Colors.white),
@@ -237,11 +309,33 @@ class _ConsentScreenState extends State<ConsentScreen> {
                     color: const Color(0xFFFAFAFA),
                     child: ListView(
                       children: [
-                        _SideItem(icon: Icons.dashboard_outlined, label: AppLocalizations.of(context).t('dashboard'), onTap: _goDashboard),
-                        _SideItem(icon: Icons.badge_outlined, label: AppLocalizations.of(context).t('children'), onTap: _showChildrenCount),
-                        _SideItem(icon: Icons.dataset_outlined, label: AppLocalizations.of(context).t('risk_status'), onTap: _showRiskStatus),
-                        _SideItem(icon: Icons.query_stats_outlined, label: AppLocalizations.of(context).t('view_past_results'), onTap: _viewPastResults),
-                        _SideItem(icon: Icons.settings_outlined, label: AppLocalizations.of(context).t('settings'), onTap: _openSettings),
+                        _SideItem(
+                          icon: Icons.dashboard_outlined,
+                          label: AppLocalizations.of(context).t('dashboard'),
+                          onTap: _goDashboard,
+                        ),
+                        _SideItem(
+                          icon: Icons.badge_outlined,
+                          label: AppLocalizations.of(context).t('children'),
+                          onTap: _showChildrenCount,
+                        ),
+                        _SideItem(
+                          icon: Icons.dataset_outlined,
+                          label: AppLocalizations.of(context).t('risk_status'),
+                          onTap: _showRiskStatus,
+                        ),
+                        _SideItem(
+                          icon: Icons.query_stats_outlined,
+                          label: AppLocalizations.of(
+                            context,
+                          ).t('view_past_results'),
+                          onTap: _viewPastResults,
+                        ),
+                        _SideItem(
+                          icon: Icons.settings_outlined,
+                          label: AppLocalizations.of(context).t('settings'),
+                          onTap: _openSettings,
+                        ),
                       ],
                     ),
                   ),
@@ -270,7 +364,10 @@ class _ConsentScreenState extends State<ConsentScreen> {
     return Scaffold(
       drawer: _buildNavDrawer(),
       appBar: AppBar(
-        title: Text(AppLocalizations.of(context).t('consent_title'), style: const TextStyle(fontWeight: FontWeight.w700)),
+        title: Text(
+          AppLocalizations.of(context).t('consent_title'),
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
         backgroundColor: const Color(0xFF0D5BA7),
         foregroundColor: Colors.white,
         actions: [
@@ -292,9 +389,19 @@ class _ConsentScreenState extends State<ConsentScreen> {
                 errorBuilder: (context, error, stackTrace) => Container(
                   width: 36,
                   height: 36,
-                  decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                  ),
                   alignment: Alignment.center,
-                  child: const Text('AP', style: TextStyle(color: Color(0xFF0D5BA7), fontWeight: FontWeight.bold, fontSize: 12)),
+                  child: const Text(
+                    'AP',
+                    style: TextStyle(
+                      color: Color(0xFF0D5BA7),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -325,18 +432,18 @@ class _ConsentScreenState extends State<ConsentScreen> {
         Text(
           l10n.t('consent_header'),
           style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                color: const Color(0xFF1C5D97),
-                fontWeight: FontWeight.bold,
-                height: 1.15,
-              ),
+            color: const Color(0xFF1C5D97),
+            fontWeight: FontWeight.bold,
+            height: 1.15,
+          ),
         ),
         const SizedBox(height: 12),
         Text(
           l10n.t('consent_description'),
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-                height: 1.35,
-              ),
+            fontWeight: FontWeight.w700,
+            height: 1.35,
+          ),
         ),
         const SizedBox(height: 10),
         _bulletLine(
@@ -351,20 +458,25 @@ class _ConsentScreenState extends State<ConsentScreen> {
         RichText(
           text: TextSpan(
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: Colors.black,
-                  fontWeight: FontWeight.w700,
-                  height: 1.3,
-                ),
+              color: Colors.black,
+              fontWeight: FontWeight.w700,
+              height: 1.3,
+            ),
             children: [
               TextSpan(text: l10n.t('consent_disclaimer_line1')),
-              TextSpan(text: l10n.t('consent_disclaimer_highlight'), style: const TextStyle(color: Color(0xFF1C7DC1))),
+              TextSpan(
+                text: l10n.t('consent_disclaimer_highlight'),
+                style: const TextStyle(color: Color(0xFF1C7DC1)),
+              ),
               TextSpan(text: l10n.t('consent_disclaimer_line2')),
             ],
           ),
         ),
         const SizedBox(height: 28),
         Material(
-          color: consentGiven ? const Color(0xFF0E65B4) : const Color(0xFF85B8E0),
+          color: consentGiven
+              ? const Color(0xFF0E65B4)
+              : const Color(0xFF85B8E0),
           borderRadius: BorderRadius.circular(12),
           elevation: 2,
           child: InkWell(
@@ -381,10 +493,14 @@ class _ConsentScreenState extends State<ConsentScreen> {
                     decoration: BoxDecoration(
                       color: Colors.white.withValues(alpha: 0.22),
                       borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.42)),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.42),
+                      ),
                     ),
                     child: Icon(
-                      consentGiven ? Icons.check_box : Icons.check_box_outline_blank,
+                      consentGiven
+                          ? Icons.check_box
+                          : Icons.check_box_outline_blank,
                       color: Colors.white,
                       size: 20,
                     ),
@@ -393,7 +509,12 @@ class _ConsentScreenState extends State<ConsentScreen> {
                   Expanded(
                     child: Text(
                       l10n.t('parent_consent_confirm'),
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, height: 1.2, fontSize: 18),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        height: 1.2,
+                        fontSize: 18,
+                      ),
                     ),
                   ),
                 ],
@@ -411,7 +532,9 @@ class _ConsentScreenState extends State<ConsentScreen> {
                 backgroundColor: const Color(0xFF0D5BA7),
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
               child: Text(l10n.t('continue_to_screening')),
             ),
@@ -427,14 +550,27 @@ class _ConsentScreenState extends State<ConsentScreen> {
       children: [
         const Padding(
           padding: EdgeInsets.only(top: 6),
-          child: Text('• ', style: TextStyle(color: Color(0xFF1C7DC1), fontWeight: FontWeight.bold)),
+          child: Text(
+            '• ',
+            style: TextStyle(
+              color: Color(0xFF1C7DC1),
+              fontWeight: FontWeight.bold,
+            ),
+          ),
         ),
         Expanded(
           child: RichText(
             text: TextSpan(
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.black, fontWeight: FontWeight.w700, height: 1.3),
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: Colors.black,
+                fontWeight: FontWeight.w700,
+                height: 1.3,
+              ),
               children: [
-                TextSpan(text: blueText, style: const TextStyle(color: Color(0xFF1C7DC1))),
+                TextSpan(
+                  text: blueText,
+                  style: const TextStyle(color: Color(0xFF1C7DC1)),
+                ),
                 TextSpan(text: blackText),
               ],
             ),
@@ -450,12 +586,21 @@ class _ConsentScreenState extends State<ConsentScreen> {
       children: [
         const Padding(
           padding: EdgeInsets.only(top: 6),
-          child: Text('• ', style: TextStyle(color: Color(0xFF1C7DC1), fontWeight: FontWeight.bold)),
+          child: Text(
+            '• ',
+            style: TextStyle(
+              color: Color(0xFF1C7DC1),
+              fontWeight: FontWeight.bold,
+            ),
+          ),
         ),
         Expanded(
           child: Text(
             text,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700, height: 1.3),
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              height: 1.3,
+            ),
           ),
         ),
       ],
@@ -468,7 +613,11 @@ class _SideItem extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
 
-  const _SideItem({required this.icon, required this.label, required this.onTap});
+  const _SideItem({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -480,7 +629,14 @@ class _SideItem extends StatelessWidget {
         dense: true,
         onTap: onTap,
         leading: Icon(icon, size: 18, color: const Color(0xFF6F7B86)),
-        title: Text(label, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF5E6A75))),
+        title: Text(
+          label,
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF5E6A75),
+          ),
+        ),
       ),
     );
   }

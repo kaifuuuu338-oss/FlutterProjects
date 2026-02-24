@@ -23,6 +23,14 @@ else:
 
 try:
     if __package__:
+        from .ecd_chatbot_api import build_ecd_chatbot_router
+    else:
+        from ecd_chatbot_api import build_ecd_chatbot_router
+except ImportError:
+    build_ecd_chatbot_router = None
+
+try:
+    if __package__:
         from .problem_b_activity_engine import (
             assign_activities_for_child,
             compute_compliance,
@@ -1213,6 +1221,10 @@ def create_app() -> FastAPI:
             "to a reachable PostgreSQL database, for example "
             "'postgresql://<user>:<password>@127.0.0.1:5432/ecd_data'."
         ) from exc
+
+    if build_ecd_chatbot_router is None:
+        raise RuntimeError("ECD chatbot API module is missing; ensure app/ecd_chatbot_api.py is present.")
+    app.include_router(build_ecd_chatbot_router(db_path))
     # Simple in-memory store for tasks/checklists (child_id -> data)
     tasks_store: Dict[str, Dict] = {}
     # In-memory activity assignment + tracking store for Problem B engine

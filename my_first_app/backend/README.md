@@ -6,6 +6,10 @@ This backend serves:
 - `POST /screening/submit`
 - `POST /referral/create`
 - `GET /health`
+- `POST /api/child/register` (ECD chatbot intake)
+- `GET /api/milestones/{child_id}` (age-banded milestone questions)
+- `POST /api/domain/submit` (5-domain binary delay scoring)
+- `POST /api/llm/guidance` (optional caregiver guidance)
 
 ## 1) Setup
 
@@ -58,7 +62,28 @@ Health check:
 
 `http://127.0.0.1:8000/health`
 
-## 5) Flutter app config
+## 5) Optional OpenAI Guidance
+
+Set API key in environment (do not hardcode in source):
+
+```powershell
+$env:OPENAI_API_KEY="your_key_here"
+```
+
+Alternative supported name:
+
+```powershell
+$env:OPEN_API_KEY="your_key_here"
+```
+
+Optional:
+
+```powershell
+$env:OPENAI_MODEL="gpt-4o-mini"
+$env:OPENAI_TIMEOUT_SECONDS="20"
+```
+
+## 6) Flutter app config
 
 Set base URL to:
 

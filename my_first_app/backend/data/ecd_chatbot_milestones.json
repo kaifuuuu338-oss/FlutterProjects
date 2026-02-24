@@ -1,0 +1,154 @@
+﻿{
+  "age_bands": {
+    "0-12": {
+      "thresholds": {"GM": 2, "FM": 2, "SE": 2, "COG": 2, "LC": 2},
+      "domains": {
+        "GM": [
+          {"id": "GM_0_1", "text": "Holds head steady without support?", "major": true, "expected_yes": true},
+          {"id": "GM_0_2", "text": "No head control by 6 months? (Red Flag)", "major": true, "expected_yes": false}
+        ],
+        "FM": [
+          {"id": "FM_0_1", "text": "Reaches and grasps nearby objects?", "major": true, "expected_yes": true},
+          {"id": "FM_0_2", "text": "Does not reach for objects? (Red Flag)", "major": true, "expected_yes": false}
+        ],
+        "SE": [
+          {"id": "SE_0_1", "text": "Shows social smile with caregiver?", "major": true, "expected_yes": true},
+          {"id": "SE_0_2", "text": "No social engagement? (Red Flag)", "major": true, "expected_yes": false}
+        ],
+        "COG": [
+          {"id": "COG_0_1", "text": "Tracks moving objects visually?", "major": true, "expected_yes": true},
+          {"id": "COG_0_2", "text": "No visual interest in surroundings? (Red Flag)", "major": true, "expected_yes": false}
+        ],
+        "LC": [
+          {"id": "LC_0_1", "text": "Turns toward sound consistently?", "major": true, "expected_yes": true},
+          {"id": "LC_0_2", "text": "No vocalization at all? (Red Flag)", "major": true, "expected_yes": false}
+        ]
+      }
+    },
+    "13-24": {
+      "thresholds": {"GM": 2, "FM": 2, "SE": 2, "COG": 2, "LC": 2},
+      "domains": {
+        "GM": [
+          {"id": "GM_13_1", "text": "Walks independently?", "major": true, "expected_yes": true},
+          {"id": "GM_13_2", "text": "Not walking independently by 18 months? (Red Flag)", "major": true, "expected_yes": false}
+        ],
+        "FM": [
+          {"id": "FM_13_1", "text": "Uses pincer grasp for small objects?", "major": true, "expected_yes": true},
+          {"id": "FM_13_2", "text": "Cannot grasp small objects? (Red Flag)", "major": true, "expected_yes": false}
+        ],
+        "SE": [
+          {"id": "SE_13_1", "text": "Seeks comfort from caregiver when upset?", "major": true, "expected_yes": true},
+          {"id": "SE_13_2", "text": "No emotional response or social engagement? (Red Flag)", "major": true, "expected_yes": false}
+        ],
+        "COG": [
+          {"id": "COG_13_1", "text": "Engages in simple pretend play?", "major": true, "expected_yes": true},
+          {"id": "COG_13_2", "text": "No purposeful play? (Red Flag)", "major": true, "expected_yes": false}
+        ],
+        "LC": [
+          {"id": "LC_13_1", "text": "Uses at least 10 meaningful words?", "major": true, "expected_yes": true},
+          {"id": "LC_13_2", "text": "No single words by 18 months? (Red Flag)", "major": true, "expected_yes": false}
+        ]
+      }
+    },
+    "25-36": {
+      "thresholds": {"GM": 2, "FM": 2, "SE": 2, "COG": 2, "LC": 2},
+      "domains": {
+        "GM": [
+          {"id": "GM_25_1", "text": "Runs without frequent falling?", "major": true, "expected_yes": true},
+          {"id": "GM_25_2", "text": "Cannot walk steadily? (Red Flag)", "major": true, "expected_yes": false}
+        ],
+        "FM": [
+          {"id": "FM_25_1", "text": "Stacks 4 to 6 blocks?", "major": true, "expected_yes": true},
+          {"id": "FM_25_2", "text": "Cannot manipulate small objects? (Red Flag)", "major": true, "expected_yes": false}
+        ],
+        "SE": [
+          {"id": "SE_25_1", "text": "Shows social interaction during play?", "major": true, "expected_yes": true},
+          {"id": "SE_25_2", "text": "No interest in social interaction? (Red Flag)", "major": true, "expected_yes": false}
+        ],
+        "COG": [
+          {"id": "COG_25_1", "text": "Engages in pretend play?", "major": true, "expected_yes": true},
+          {"id": "COG_25_2", "text": "No purposeful play? (Red Flag)", "major": true, "expected_yes": false}
+        ],
+        "LC": [
+          {"id": "LC_25_1", "text": "Uses two-word phrases?", "major": true, "expected_yes": true},
+          {"id": "LC_25_2", "text": "No two-word phrases by 30 months? (Red Flag)", "major": true, "expected_yes": false}
+        ]
+      }
+    },
+    "37-48": {
+      "thresholds": {"GM": 2, "FM": 2, "SE": 2, "COG": 2, "LC": 2},
+      "domains": {
+        "GM": [
+          {"id": "GM_37_1", "text": "Runs smoothly and climbs stairs alternating feet?", "major": true, "expected_yes": true},
+          {"id": "GM_37_2", "text": "Frequent falls or poor coordination? (Red Flag)", "major": true, "expected_yes": false}
+        ],
+        "FM": [
+          {"id": "FM_37_1", "text": "Copies lines and circles?", "major": true, "expected_yes": true},
+          {"id": "FM_37_2", "text": "Cannot manipulate small objects? (Red Flag)", "major": true, "expected_yes": false}
+        ],
+        "SE": [
+          {"id": "SE_37_1", "text": "Plays cooperatively with peers?", "major": true, "expected_yes": true},
+          {"id": "SE_37_2", "text": "Severe aggression or social withdrawal? (Red Flag)", "major": true, "expected_yes": false}
+        ],
+        "COG": [
+          {"id": "COG_37_1", "text": "Sorts objects by shape or color?", "major": true, "expected_yes": true},
+          {"id": "COG_37_2", "text": "No pretend/problem-solving play? (Red Flag)", "major": true, "expected_yes": false}
+        ],
+        "LC": [
+          {"id": "LC_37_1", "text": "Speaks in short sentences and follows commands?", "major": true, "expected_yes": true},
+          {"id": "LC_37_2", "text": "Speech mostly unintelligible? (Red Flag)", "major": true, "expected_yes": false}
+        ]
+      }
+    },
+    "49-60": {
+      "thresholds": {"GM": 2, "FM": 2, "SE": 2, "COG": 2, "LC": 2},
+      "domains": {
+        "GM": [
+          {"id": "GM_49_1", "text": "Hops on one foot and balances briefly?", "major": true, "expected_yes": true},
+          {"id": "GM_49_2", "text": "Major coordination difficulty? (Red Flag)", "major": true, "expected_yes": false}
+        ],
+        "FM": [
+          {"id": "FM_49_1", "text": "Copies square/cross and uses pencil grip?", "major": true, "expected_yes": true},
+          {"id": "FM_49_2", "text": "Cannot copy basic shapes? (Red Flag)", "major": true, "expected_yes": false}
+        ],
+        "SE": [
+          {"id": "SE_49_1", "text": "Shows empathy and follows group rules?", "major": true, "expected_yes": true},
+          {"id": "SE_49_2", "text": "Extreme aggression or withdrawal? (Red Flag)", "major": true, "expected_yes": false}
+        ],
+        "COG": [
+          {"id": "COG_49_1", "text": "Counts to 10 and identifies basic colors?", "major": true, "expected_yes": true},
+          {"id": "COG_49_2", "text": "Cannot complete structured tasks? (Red Flag)", "major": true, "expected_yes": false}
+        ],
+        "LC": [
+          {"id": "LC_49_1", "text": "Speaks clearly and answers why/how questions?", "major": true, "expected_yes": true},
+          {"id": "LC_49_2", "text": "Speech unclear to unfamiliar listeners? (Red Flag)", "major": true, "expected_yes": false}
+        ]
+      }
+    },
+    "61-72": {
+      "thresholds": {"GM": 2, "FM": 2, "SE": 2, "COG": 2, "LC": 2},
+      "domains": {
+        "GM": [
+          {"id": "GM_61_1", "text": "Skips, balances, and coordinates movement well?", "major": true, "expected_yes": true},
+          {"id": "GM_61_2", "text": "Unable to coordinate age-appropriate movement? (Red Flag)", "major": true, "expected_yes": false}
+        ],
+        "FM": [
+          {"id": "FM_61_1", "text": "Writes own name and cuts along lines?", "major": true, "expected_yes": true},
+          {"id": "FM_61_2", "text": "Unable to perform basic writing/cutting tasks? (Red Flag)", "major": true, "expected_yes": false}
+        ],
+        "SE": [
+          {"id": "SE_61_1", "text": "Cooperates with peers and follows school rules?", "major": true, "expected_yes": true},
+          {"id": "SE_61_2", "text": "Persistent social isolation or dysregulation? (Red Flag)", "major": true, "expected_yes": false}
+        ],
+        "COG": [
+          {"id": "COG_61_1", "text": "Recognizes letters/numbers and basic reasoning?", "major": true, "expected_yes": true},
+          {"id": "COG_61_2", "text": "Cannot complete basic age-appropriate reasoning tasks? (Red Flag)", "major": true, "expected_yes": false}
+        ],
+        "LC": [
+          {"id": "LC_61_1", "text": "Communicates clearly and retells short stories?", "major": true, "expected_yes": true},
+          {"id": "LC_61_2", "text": "Cannot communicate needs clearly? (Red Flag)", "major": true, "expected_yes": false}
+        ]
+      }
+    }
+  }
+}

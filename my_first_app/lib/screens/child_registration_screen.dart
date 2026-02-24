@@ -15,7 +15,8 @@ class ChildRegistrationScreen extends StatefulWidget {
   const ChildRegistrationScreen({super.key});
 
   @override
-  State<ChildRegistrationScreen> createState() => _ChildRegistrationScreenState();
+  State<ChildRegistrationScreen> createState() =>
+      _ChildRegistrationScreenState();
 }
 
 class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
@@ -31,6 +32,9 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
     text: 'AWS_DEMO_001',
   );
   final TextEditingController _dobController = TextEditingController();
+  final TextEditingController _birthHistoryController = TextEditingController();
+  final TextEditingController _healthHistoryController =
+      TextEditingController();
 
   DateTime? _dob;
   final String _gender = 'M';
@@ -44,6 +48,8 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
     _childIdController.dispose();
     _awcCodeController.dispose();
     _dobController.dispose();
+    _birthHistoryController.dispose();
+    _healthHistoryController.dispose();
     super.dispose();
   }
 
@@ -56,6 +62,14 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
     final month = date.month.toString().padLeft(2, '0');
     final day = date.day.toString().padLeft(2, '0');
     return '${date.year}-$month-$day';
+  }
+
+  List<String> _parseHistoryItems(String raw) {
+    return raw
+        .split(RegExp(r'[\n,;]+'))
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toList();
   }
 
   Future<void> _pickDob() async {
@@ -89,13 +103,19 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
     if (!_formKey.currentState!.validate()) return;
     if (_dob == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppLocalizations.of(context).t('please_select_dob'))),
+        SnackBar(
+          content: Text(AppLocalizations.of(context).t('please_select_dob')),
+        ),
       );
       return;
     }
     if (_district == null || _mandal == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppLocalizations.of(context).t('please_select_district_and_mandal'))),
+        SnackBar(
+          content: Text(
+            AppLocalizations.of(context).t('please_select_district_and_mandal'),
+          ),
+        ),
       );
       return;
     }
@@ -150,6 +170,8 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
           childId: child.childId,
           ageMonths: child.ageMonths,
           awwId: child.awwId,
+          birthHistory: _parseHistoryItems(_birthHistoryController.text),
+          healthHistory: _parseHistoryItems(_healthHistoryController.text),
         ),
       ),
     );
@@ -183,7 +205,9 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                         : AppLocalizations.of(context).t('gender_female');
                     return ListTile(
                       title: Text(c.childId),
-                      subtitle: Text('${AppLocalizations.of(context).t('age_with_months', {'age': '${c.ageMonths}'})} | $genderLabel'),
+                      subtitle: Text(
+                        '${AppLocalizations.of(context).t('age_with_months', {'age': '${c.ageMonths}'})} | $genderLabel',
+                      ),
                     );
                   },
                 ),
@@ -210,7 +234,9 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
     if (!mounted) return;
     if (past.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppLocalizations.of(context).t('no_past_results'))),
+        SnackBar(
+          content: Text(AppLocalizations.of(context).t('no_past_results')),
+        ),
       );
       return;
     }
@@ -223,8 +249,14 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
           final s = past[index];
           final risk = s.overallRisk.toString().split('.').last;
           return ListTile(
-            title: Text('${s.childId} - ${AppLocalizations.of(context).t(risk.toLowerCase()).toUpperCase()}'),
-            subtitle: Text(AppLocalizations.of(context).t('date_label', {'date': '${s.screeningDate.toLocal()}'})),
+            title: Text(
+              '${s.childId} - ${AppLocalizations.of(context).t(risk.toLowerCase()).toUpperCase()}',
+            ),
+            subtitle: Text(
+              AppLocalizations.of(
+                context,
+              ).t('date_label', {'date': '${s.screeningDate.toLocal()}'}),
+            ),
             trailing: const Icon(Icons.open_in_new),
             onTap: () {
               Navigator.of(context).pop();
@@ -258,7 +290,9 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
     final low = all.where((s) => s.overallRisk == RiskLevel.low).length;
     final medium = all.where((s) => s.overallRisk == RiskLevel.medium).length;
     final high = all.where((s) => s.overallRisk == RiskLevel.high).length;
-    final critical = all.where((s) => s.overallRisk == RiskLevel.critical).length;
+    final critical = all
+        .where((s) => s.overallRisk == RiskLevel.critical)
+        .length;
     if (!mounted) return;
     showDialog(
       context: context,
@@ -275,16 +309,19 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(AppLocalizations.of(context).t('ok'))),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(AppLocalizations.of(context).t('ok')),
+          ),
         ],
       ),
     );
   }
 
   void _openSettings() {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const SettingsScreen()),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
   }
 
   @override
@@ -316,7 +353,11 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                 const SizedBox(width: 12),
                 Text(
                   AppLocalizations.of(context).t('govt_andhra_pradesh'),
-                  style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 const Spacer(),
                 const LanguageMenuButton(iconColor: Colors.white),
@@ -339,10 +380,20 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                   child: Row(
                     children: [
                       ClipOval(
-                        child: Image.asset('assets/images/ap_logo.png', width: 36, height: 36, fit: BoxFit.cover),
+                        child: Image.asset(
+                          'assets/images/ap_logo.png',
+                          width: 36,
+                          height: 36,
+                          fit: BoxFit.cover,
+                        ),
                       ),
                       const SizedBox(width: 8),
-                      Expanded(child: Text(AppLocalizations.of(context).t('govt_andhra_pradesh'), style: const TextStyle(fontWeight: FontWeight.bold))),
+                      Expanded(
+                        child: Text(
+                          AppLocalizations.of(context).t('govt_andhra_pradesh'),
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -365,7 +416,9 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                 ),
                 ListTile(
                   leading: const Icon(Icons.show_chart),
-                  title: Text(AppLocalizations.of(context).t('view_past_results')),
+                  title: Text(
+                    AppLocalizations.of(context).t('view_past_results'),
+                  ),
                   onTap: _viewPastResults,
                 ),
                 ListTile(
@@ -390,7 +443,10 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                       const SizedBox(height: 8),
                       Text(
                         AppLocalizations.of(context).t('register_child_title'),
-                        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                       const SizedBox(height: 12),
 
@@ -400,7 +456,11 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                           labelText: AppLocalizations.of(context).t('child_id'),
                           prefixIcon: const Icon(Icons.badge_outlined),
                         ),
-                        validator: (v) => (v == null || v.trim().isEmpty) ? AppLocalizations.of(context).t('child_id_required') : null,
+                        validator: (v) => (v == null || v.trim().isEmpty)
+                            ? AppLocalizations.of(
+                                context,
+                              ).t('child_id_required')
+                            : null,
                       ),
                       const SizedBox(height: 12),
 
@@ -413,12 +473,18 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                           prefixIcon: const Icon(Icons.calendar_today_outlined),
                           hintText: AppLocalizations.of(context).t('dob_hint'),
                         ),
-                        validator: (v) => (v == null || v.trim().isEmpty) ? AppLocalizations.of(context).t('please_select_dob') : null,
+                        validator: (v) => (v == null || v.trim().isEmpty)
+                            ? AppLocalizations.of(
+                                context,
+                              ).t('please_select_dob')
+                            : null,
                       ),
                       const SizedBox(height: 6),
                       if (_dob != null)
                         Text(
-                          AppLocalizations.of(context).t('age_with_months', {'age': '$_ageMonths'}),
+                          AppLocalizations.of(
+                            context,
+                          ).t('age_with_months', {'age': '$_ageMonths'}),
                           style: TextStyle(color: Colors.grey[700]),
                         ),
                       const SizedBox(height: 12),
@@ -429,17 +495,45 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                           labelText: AppLocalizations.of(context).t('awc_code'),
                           prefixIcon: const Icon(Icons.home_outlined),
                         ),
-                        validator: (v) => (v == null || v.trim().isEmpty) ? AppLocalizations.of(context).t('aws_code_required') : null,
+                        validator: (v) => (v == null || v.trim().isEmpty)
+                            ? AppLocalizations.of(
+                                context,
+                              ).t('aws_code_required')
+                            : null,
+                      ),
+                      const SizedBox(height: 12),
+
+                      TextFormField(
+                        controller: _birthHistoryController,
+                        maxLines: 2,
+                        decoration: const InputDecoration(
+                          labelText: 'Birth history (optional)',
+                          hintText: 'e.g. preterm, NICU stay',
+                          prefixIcon: Icon(Icons.monitor_heart_outlined),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
+                      TextFormField(
+                        controller: _healthHistoryController,
+                        maxLines: 2,
+                        decoration: const InputDecoration(
+                          labelText: 'Health history (optional)',
+                          hintText: 'e.g. seizures, hearing concerns',
+                          prefixIcon: Icon(Icons.health_and_safety_outlined),
+                        ),
                       ),
                       const SizedBox(height: 12),
 
                       DropdownButtonFormField<String>(
                         initialValue: _district,
                         items: _districts
-                            .map((d) => DropdownMenuItem<String>(
-                                  value: d,
-                                  child: Text(d),
-                                ))
+                            .map(
+                              (d) => DropdownMenuItem<String>(
+                                value: d,
+                                child: Text(d),
+                              ),
+                            )
                             .toList(),
                         onChanged: (value) {
                           setState(() {
@@ -451,17 +545,21 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                           labelText: AppLocalizations.of(context).t('district'),
                           prefixIcon: const Icon(Icons.location_city),
                         ),
-                        validator: (v) => (v == null || v.trim().isEmpty) ? AppLocalizations.of(context).t('select_district') : null,
+                        validator: (v) => (v == null || v.trim().isEmpty)
+                            ? AppLocalizations.of(context).t('select_district')
+                            : null,
                       ),
                       const SizedBox(height: 12),
 
                       DropdownButtonFormField<String>(
                         initialValue: _mandal,
                         items: _mandalsForDistrict
-                            .map((m) => DropdownMenuItem<String>(
-                                  value: m,
-                                  child: Text(m),
-                                ))
+                            .map(
+                              (m) => DropdownMenuItem<String>(
+                                value: m,
+                                child: Text(m),
+                              ),
+                            )
                             .toList(),
                         onChanged: _district == null
                             ? null
@@ -472,24 +570,34 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                           labelText: AppLocalizations.of(context).t('mandal'),
                           prefixIcon: const Icon(Icons.map_outlined),
                         ),
-                        validator: (v) => (v == null || v.trim().isEmpty) ? AppLocalizations.of(context).t('select_mandal') : null,
+                        validator: (v) => (v == null || v.trim().isEmpty)
+                            ? AppLocalizations.of(context).t('select_mandal')
+                            : null,
                       ),
                       const SizedBox(height: 12),
 
                       DropdownButtonFormField<String>(
                         initialValue: _assessmentCycle,
                         items: _assessmentCycles
-                            .map((c) => DropdownMenuItem<String>(
-                                  value: c,
-                                  child: Text(AppLocalizations.of(context).t(c.toLowerCase())),
-                                ))
+                            .map(
+                              (c) => DropdownMenuItem<String>(
+                                value: c,
+                                child: Text(
+                                  AppLocalizations.of(
+                                    context,
+                                  ).t(c.toLowerCase()),
+                                ),
+                              ),
+                            )
                             .toList(),
                         onChanged: (value) {
                           if (value == null) return;
                           setState(() => _assessmentCycle = value);
                         },
                         decoration: InputDecoration(
-                          labelText: AppLocalizations.of(context).t('assessment_cycle'),
+                          labelText: AppLocalizations.of(
+                            context,
+                          ).t('assessment_cycle'),
                           prefixIcon: const Icon(Icons.assignment_outlined),
                         ),
                       ),
