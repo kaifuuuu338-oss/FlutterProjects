@@ -49,19 +49,31 @@ class _FollowupCompleteScreenState extends State<FollowupCompleteScreen> {
       final response = await _dio.get('/follow-up/${widget.referralId}');
       final data = response.data as Map<String, dynamic>;
 
+      final status = (data['status'] ?? 'PENDING').toString();
+      final totalActivities = _toInt(data['total_activities']);
+      final completedActivities = _toInt(data['completed_activities']);
+      final serverPercent = _toDouble(data['completion_percent'] ?? data['progress']);
+      final derivedPercent = totalActivities > 0
+          ? (completedActivities / totalActivities) * 100
+          : 0.0;
+      final completionPercent = (serverPercent ??
+          (status.toUpperCase() == 'COMPLETED' && totalActivities == 0
+              ? 100.0
+              : derivedPercent));
+
       // Parse referral data
       _referralData = {
         'facility': data['facility'] ?? 'PHC',
         'urgency': data['urgency'] ?? 'Priority',
-        'status': data['status'] ?? 'PENDING',
+        'status': status,
         'deadline': data['deadline'] ?? DateTime.now().toString().split(' ')[0],
         'days_remaining': _calculateDaysRemaining(data['deadline']),
         'is_overdue': _isOverdue(data['deadline']),
         'escalation_level': data['escalation_level'] ?? 0,
         'escalated_to': data['escalated_to'] ?? 'Unknown',
-        'total_activities': data['total_activities'] ?? 0,
-        'completed_activities': data['completed_activities'] ?? 0,
-        'progress': data['progress'] ?? 0.0,
+        'total_activities': totalActivities,
+        'completed_activities': completedActivities,
+        'progress': completionPercent,
       };
 
       // Parse activities
@@ -89,6 +101,18 @@ class _FollowupCompleteScreenState extends State<FollowupCompleteScreen> {
         _errorMessage = 'Failed to load follow-up: ${e.toString()}';
       });
     }
+  }
+
+  int _toInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  double? _toDouble(dynamic value) {
+    if (value is double) return value;
+    if (value is num) return value.toDouble();
+    return double.tryParse(value?.toString() ?? '');
   }
 
   int _calculateDaysRemaining(String? deadline) {
@@ -189,6 +213,10 @@ class _FollowupCompleteScreenState extends State<FollowupCompleteScreen> {
             const SizedBox(height: 16),
 
             // 3️⃣ CAREGIVER ACTIVITIES
+            if (_activities!.isEmpty) ...[
+              _buildNoActivitiesCard(),
+              const SizedBox(height: 16),
+            ],
             if (_caregiverActivities!.isNotEmpty) ...[
               _buildActivitySection(
                 title: 'Caregiver Activities (Home Exercises)',
@@ -341,9 +369,10 @@ class _FollowupCompleteScreenState extends State<FollowupCompleteScreen> {
     final progress = _referralData!['progress'] as double;
     final completed = _referralData!['completed_activities'] as int;
     final total = _referralData!['total_activities'] as int;
+    final status = (_referralData!['status'] ?? '').toString().toUpperCase();
 
     Color progressColor = Colors.red;
-    if (progress >= 80) {
+    if (progress >= 80 || status == 'COMPLETED') {
       progressColor = Colors.green;
     } else if (progress >= 50) {
       progressColor = Colors.orange;
@@ -364,7 +393,7 @@ class _FollowupCompleteScreenState extends State<FollowupCompleteScreen> {
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
                 Text(
-                  '$completed/$total',
+                  status == 'COMPLETED' && total == 0 ? 'Completed' : '$completed/$total',
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
               ],
@@ -373,7 +402,9 @@ class _FollowupCompleteScreenState extends State<FollowupCompleteScreen> {
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: LinearProgressIndicator(
-                value: total > 0 ? progress / 100 : 0,
+                value: total > 0
+                    ? progress / 100
+                    : (status == 'COMPLETED' ? 1.0 : 0.0),
                 minHeight: 8,
                 backgroundColor: Colors.grey.shade300,
                 valueColor: AlwaysStoppedAnimation<Color>(progressColor),
@@ -386,6 +417,34 @@ class _FollowupCompleteScreenState extends State<FollowupCompleteScreen> {
                 fontSize: 12,
                 color: progressColor,
                 fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNoActivitiesCard() {
+    final status = (_referralData?['status'] ?? '').toString().toUpperCase();
+    final message = status == 'COMPLETED'
+        ? 'Referral is completed. No pending follow-up activities.'
+        : 'No activities assigned yet for this referral.';
+    return Card(
+      elevation: 1,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            Icon(
+              status == 'COMPLETED' ? Icons.check_circle : Icons.info_outline,
+              color: status == 'COMPLETED' ? Colors.green : Colors.blueGrey,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                message,
+                style: const TextStyle(fontSize: 13),
               ),
             ),
           ],
@@ -606,15 +665,17 @@ class Activity {
   });
 
   factory Activity.fromJson(Map<String, dynamic> json) {
+    final completedRaw = json['completed'];
+    final isCompleted = completedRaw == true || completedRaw == 1 || completedRaw == '1';
     return Activity(
       id: json['id'] ?? 0,
       targetUser: json['target_user'] ?? 'CAREGIVER',
       domain: json['domain'] ?? 'GM',
-      title: json['activity_title'] ?? 'Activity',
-      description: json['activity_description'] ?? '',
+      title: json['title'] ?? json['activity_title'] ?? 'Activity',
+      description: json['description'] ?? json['activity_description'] ?? '',
       frequency: json['frequency'] ?? 'DAILY',
       durationDays: json['duration_days'] ?? 30,
-      completed: (json['completed'] ?? 0) == 1,
+      completed: isCompleted,
       completedOn: json['completed_on'],
     );
   }

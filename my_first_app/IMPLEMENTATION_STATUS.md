@@ -142,7 +142,7 @@ Test Data: Populated
   History entries: 2+ transitions
 
 Relationships: Functional
-  Foreign keys: Not enforced (SQLite default)
+  Foreign keys: Enforced by PostgreSQL schema constraints
   Joins: Working correctly
 ```
 
@@ -348,7 +348,7 @@ PENDING (Initial)
 ## Deployment Checklist
 
 Before production deployment:
-- [ ] Update database to PostgreSQL (from SQLite)
+- [x] Database migrated to PostgreSQL
 - [ ] Implement environment variables for configuration
 - [ ] Add HTTP authentication/API keys
 - [ ] Set up CORS properly for production domain
@@ -369,7 +369,7 @@ Before production deployment:
 
 **Documentation**: See REFERRAL_SYSTEM_TESTING_GUIDE.md for detailed testing procedures
 
-**Database**: backend/app/ecd_data.db (SQLite)
+**Database**: PostgreSQL (`ecd_data`, configured via `ECD_DATABASE_URL`)
 
 ---
 

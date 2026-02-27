@@ -65,7 +65,7 @@ class _ReferralPageState extends State<ReferralPage> {
         }
         final detail = e.response?.data;
         if (detail is Map && detail['detail'] is String) {
-          message = '${message} ${detail['detail']}';
+          message = '$message ${detail['detail']}';
         }
       } else if (e is Exception) {
         message = e.toString().replaceFirst('Exception: ', '');

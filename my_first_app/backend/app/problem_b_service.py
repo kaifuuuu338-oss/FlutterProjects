@@ -56,13 +56,10 @@ class ProblemBService:
             )
             existing = cursor.fetchone()
             if not existing or not existing.get("table_name"):
-                schema_path = __file__.replace("problem_b_service.py", "problem_b_schema.sql")
-                try:
-                    with open(schema_path, "r", encoding="utf-8") as f:
-                        conn.executescript(f.read())
-                    conn.commit()
-                except Exception as e:
-                    print(f"Warning: could not initialize Problem B schema: {e}")
+                print(
+                    "Warning: Problem B tables are missing. "
+                    "Run database setup/migrations before using Problem B endpoints."
+                )
 
     # =========================================================================
     # PHASE 1: CREATE INTERVENTION PHASE
@@ -600,18 +597,6 @@ def rule_logic_table() -> Dict:
             {"condition": "trend = worsened", "action": "escalate"},
             {"condition": "adherence < 40%", "action": "intensify"},
             {"condition": "delay reduction >= 1 and intensity low", "action": "maintenance"},
-        ]
-    }
-
-
-def schema_tables() -> Dict:
-    return {
-        "tables": [
-            "intervention_phase",
-            "activities",
-            "task_logs",
-            "review_log",
-            "referral",
         ]
     }
 

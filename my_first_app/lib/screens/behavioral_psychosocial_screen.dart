@@ -322,6 +322,7 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
 
     final payload = {
       'child_id': widget.childId,
+      'awc_id': _child?.awcCode ?? '',
       'assessment_type': 'behavioural_psychosocial',
       'age_months': widget.ageMonths,
       'domain_responses': screening.domainResponses,

@@ -55,7 +55,10 @@ class ProblemBService:
     """
     
     def __init__(self):
-        self.db_path = "problem_b.db"
+        self.db_url = os.getenv(
+            "ECD_DATABASE_URL",
+            "postgresql://postgres:postgres@127.0.0.1:5432/ecd_data",
+        )
     
     # ════════════════════════════════════════════════════════════════
     # PHASE 1: Plan Creation
@@ -389,16 +392,8 @@ Shows:
 
 ## STEP 5: Database Setup
 
-### Already Created: `backend/app/problem_b_schema.sql`
-
-Just need to run:
-```sql
--- Execute in your database
-sqlite3 problem_b.db < backend/app/problem_b_schema.sql
-
--- Verify tables created
-.tables
-```
+Ensure Problem B tables are already created in your configured PostgreSQL database
+before running the API endpoints.
 
 ---
 

@@ -369,7 +369,6 @@ Child: Ravi, Age 24 months, GM delay = 4 months
 ## Key Files
 
 - `backend/app/problem_b_service.py` - Core lifecycle engine
-- `backend/app/problem_b_schema.sql` - Database schema
 - `backend/app/main.py` - API endpoints
 - `lib/providers/intervention_provider.dart` - Flutter state management
 - `lib/screens/intervention_plan_dashboard.dart` - Main UI

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import uuid
 from collections import Counter
 from datetime import datetime, date, timedelta
@@ -20,14 +21,6 @@ else:
     from intervention import generate_intervention, calculate_trend
     from problem_b_service import ProblemBService
     from pg_compat import get_conn
-
-try:
-    if __package__:
-        from .ecd_chatbot_api import build_ecd_chatbot_router
-    else:
-        from ecd_chatbot_api import build_ecd_chatbot_router
-except ImportError:
-    build_ecd_chatbot_router = None
 
 try:
     if __package__:
@@ -67,10 +60,43 @@ except ImportError:
     weekly_progress_rows = None
 
 DEFAULT_ECD_DATABASE_URL = "postgresql://postgres:postgres@127.0.0.1:5432/ecd_data"
+_AWC_DEMO_PATTERN = re.compile(r"^(AWW|AWS)_DEMO_(\d{3,4})$")
+
+
+def _normalize_awc_code(value: Optional[str], prefer_prefix: str = "AWW") -> str:
+    raw = (value or "").strip().upper()
+    if not raw:
+        return ""
+    match = _AWC_DEMO_PATTERN.fullmatch(raw)
+    if not match:
+        return raw
+    suffix = match.group(2)
+    prefix = "AWS" if prefer_prefix.upper() == "AWS" else "AWW"
+    return f"{prefix}_DEMO_{suffix}"
+
+
+def _awc_code_variants(value: Optional[str]) -> List[str]:
+    normalized = _normalize_awc_code(value, prefer_prefix="AWW")
+    if not normalized:
+        return []
+    match = _AWC_DEMO_PATTERN.fullmatch(normalized)
+    if not match:
+        return [normalized]
+    suffix = match.group(2)
+    return [f"AWW_DEMO_{suffix}", f"AWS_DEMO_{suffix}"]
+
+
+def _awc_codes_equal(left: Optional[str], right: Optional[str]) -> bool:
+    left_variants = set(_awc_code_variants(left))
+    right_variants = set(_awc_code_variants(right))
+    if left_variants and right_variants:
+        return not left_variants.isdisjoint(right_variants)
+    return _normalize_awc_code(left) == _normalize_awc_code(right)
 
 
 class LoginRequest(BaseModel):
-    mobile_number: str
+    awc_code: Optional[str] = None
+    mobile_number: Optional[str] = None
     password: str
 
 
@@ -80,8 +106,8 @@ class LoginResponse(BaseModel):
 
 
 class RegistrationRequest(BaseModel):
-    name: str
-    mobile_number: str
+    name: Optional[str] = ""
+    mobile_number: Optional[str] = ""
     password: str
     awc_code: str
     mandal: Optional[str] = None
@@ -177,6 +203,79 @@ def _get_conn(db_url: str):
     return get_conn(db_url)
 
 
+def _refresh_child_profile_filter_tables(conn) -> None:
+    """Rebuild filtered child profile tables from the canonical child_profile table."""
+    conn.execute("TRUNCATE TABLE child_profile_by_district")
+    conn.execute(
+        """
+        INSERT INTO child_profile_by_district(
+          child_id, dob, awc_code, district, mandal, assessment_cycle
+        )
+        SELECT
+          child_id,
+          dob,
+          awc_code,
+          BTRIM(district),
+          NULLIF(BTRIM(mandal), ''),
+          assessment_cycle
+        FROM child_profile
+        WHERE COALESCE(BTRIM(district), '') <> ''
+        """
+    )
+
+    conn.execute("TRUNCATE TABLE child_profile_by_mandal")
+    conn.execute(
+        """
+        INSERT INTO child_profile_by_mandal(
+          child_id, dob, awc_code, district, mandal, assessment_cycle
+        )
+        SELECT
+          child_id,
+          dob,
+          awc_code,
+          NULLIF(BTRIM(district), ''),
+          BTRIM(mandal),
+          assessment_cycle
+        FROM child_profile
+        WHERE COALESCE(BTRIM(mandal), '') <> ''
+        """
+    )
+
+    conn.execute("TRUNCATE TABLE child_profile_by_anganwadi")
+    conn.execute(
+        """
+        INSERT INTO child_profile_by_anganwadi(
+          child_id, dob, awc_code, district, mandal, assessment_cycle
+        )
+        SELECT
+          child_id,
+          dob,
+          BTRIM(awc_code),
+          NULLIF(BTRIM(district), ''),
+          NULLIF(BTRIM(mandal), ''),
+          assessment_cycle
+        FROM child_profile
+        WHERE COALESCE(BTRIM(awc_code), '') <> ''
+        """
+    )
+
+    awc_rows = conn.execute(
+        """
+        SELECT DISTINCT BTRIM(awc_code) AS awc_code
+        FROM child_profile_by_anganwadi
+        WHERE COALESCE(BTRIM(awc_code), '') <> ''
+        """
+    ).fetchall()
+    for row in awc_rows:
+        awc_code = str(row.get("awc_code") or "").strip()
+        if not awc_code:
+            continue
+        conn.execute(
+            "SELECT refresh_anganwadi_child_table(%s)",
+            (awc_code,),
+        )
+
+
 def _init_db(db_url: str) -> None:
     with _get_conn(db_url) as conn:
         conn.execute(
@@ -197,7 +296,7 @@ def _init_db(db_url: str) -> None:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS child_profile (
-              child_id TEXT PRIMARY KEY,
+              child_id TEXT,
               dob TEXT,
               awc_code TEXT,
               district TEXT,
@@ -206,6 +305,48 @@ def _init_db(db_url: str) -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS child_profile_by_district (
+              child_id TEXT,
+              dob TEXT,
+              awc_code TEXT,
+              district TEXT NOT NULL,
+              mandal TEXT,
+              assessment_cycle TEXT
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_child_profile_by_district_district ON child_profile_by_district(district)")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS child_profile_by_mandal (
+              child_id TEXT,
+              dob TEXT,
+              awc_code TEXT,
+              district TEXT,
+              mandal TEXT NOT NULL,
+              assessment_cycle TEXT
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_child_profile_by_mandal_mandal ON child_profile_by_mandal(mandal)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_child_profile_by_mandal_district ON child_profile_by_mandal(district)")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS child_profile_by_anganwadi (
+              child_id TEXT,
+              dob TEXT,
+              awc_code TEXT NOT NULL,
+              district TEXT,
+              mandal TEXT,
+              assessment_cycle TEXT
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_child_profile_by_anganwadi_awc_code ON child_profile_by_anganwadi(awc_code)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_child_profile_by_anganwadi_district ON child_profile_by_anganwadi(district)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_child_profile_by_anganwadi_mandal ON child_profile_by_anganwadi(mandal)")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS screening_event (
@@ -303,22 +444,251 @@ def _init_db(db_url: str) -> None:
         conn.execute("ALTER TABLE referral_action ADD COLUMN IF NOT EXISTS escalated_to TEXT")
         conn.execute("ALTER TABLE referral_action ADD COLUMN IF NOT EXISTS last_updated TEXT")
 
-        # Keep child_profile compatible with both old schema and current UI fields.
-        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS child_name TEXT")
-        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS gender TEXT")
-        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS age_months INTEGER")
-        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS village TEXT")
-        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS awc_id TEXT")
-        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS awc_code TEXT")
-        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS sector_id TEXT")
-        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS mandal_id TEXT")
-        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS mandal TEXT")
-        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS district_id TEXT")
-        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS district TEXT")
-        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS dob DATE")
-        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS assessment_cycle TEXT")
-        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS created_at TEXT")
-        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS updated_at TEXT")
+        # Keep only core child_profile columns used by current registration flow.
+        conn.execute("ALTER TABLE child_profile DROP COLUMN IF EXISTS child_name")
+        conn.execute("ALTER TABLE child_profile DROP COLUMN IF EXISTS gender")
+        conn.execute("ALTER TABLE child_profile DROP COLUMN IF EXISTS age_months")
+        conn.execute("ALTER TABLE child_profile DROP COLUMN IF EXISTS village")
+        conn.execute("ALTER TABLE child_profile DROP COLUMN IF EXISTS awc_id")
+        conn.execute("ALTER TABLE child_profile DROP COLUMN IF EXISTS sector_id")
+        conn.execute("ALTER TABLE child_profile DROP COLUMN IF EXISTS mandal_id")
+        conn.execute("ALTER TABLE child_profile DROP COLUMN IF EXISTS district_id")
+        conn.execute("ALTER TABLE child_profile DROP COLUMN IF EXISTS created_at")
+        conn.execute("ALTER TABLE child_profile DROP COLUMN IF EXISTS updated_at")
+        conn.execute("UPDATE child_profile SET awc_code = '' WHERE awc_code IS NULL")
+        conn.execute("UPDATE child_profile_by_district SET awc_code = '' WHERE awc_code IS NULL")
+        conn.execute("UPDATE child_profile_by_mandal SET awc_code = '' WHERE awc_code IS NULL")
+        conn.execute("UPDATE child_profile_by_anganwadi SET awc_code = '' WHERE awc_code IS NULL")
+        conn.execute("ALTER TABLE child_profile DROP CONSTRAINT IF EXISTS child_profile_pkey")
+        conn.execute("ALTER TABLE child_profile_by_district DROP CONSTRAINT IF EXISTS child_profile_by_district_pkey")
+        conn.execute("ALTER TABLE child_profile_by_mandal DROP CONSTRAINT IF EXISTS child_profile_by_mandal_pkey")
+        conn.execute("ALTER TABLE child_profile_by_anganwadi DROP CONSTRAINT IF EXISTS child_profile_by_anganwadi_pkey")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_child_profile_child_awc ON child_profile(child_id, awc_code)")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_child_profile_by_district_child_awc "
+            "ON child_profile_by_district(child_id, awc_code)"
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_child_profile_by_mandal_child_awc "
+            "ON child_profile_by_mandal(child_id, awc_code)"
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_child_profile_by_anganwadi_child_awc "
+            "ON child_profile_by_anganwadi(child_id, awc_code)"
+        )
+        conn.execute(
+            """
+            CREATE OR REPLACE FUNCTION anganwadi_child_table_name(raw_awc_code TEXT)
+            RETURNS TEXT
+            AS $$
+            DECLARE
+              normalized TEXT;
+            BEGIN
+              normalized := REGEXP_REPLACE(
+                LOWER(COALESCE(raw_awc_code, '')),
+                '[^a-z0-9]+',
+                '_',
+                'g'
+              );
+              normalized := BTRIM(normalized, '_');
+              IF normalized = '' THEN
+                normalized := 'unknown';
+              END IF;
+              RETURN 'child_profile_awc_' || normalized;
+            END;
+            $$ LANGUAGE plpgsql IMMUTABLE
+            """
+        )
+        conn.execute(
+            """
+            CREATE OR REPLACE FUNCTION ensure_anganwadi_child_table(raw_awc_code TEXT)
+            RETURNS TEXT
+            AS $$
+            DECLARE
+              table_name TEXT;
+            BEGIN
+              table_name := anganwadi_child_table_name(raw_awc_code);
+              EXECUTE format(
+                'CREATE TABLE IF NOT EXISTS %%I (
+                  child_id TEXT PRIMARY KEY,
+                  dob TEXT,
+                  awc_code TEXT NOT NULL,
+                  district TEXT,
+                  mandal TEXT,
+                  assessment_cycle TEXT
+                )',
+                table_name
+              );
+              RETURN table_name;
+            END;
+            $$ LANGUAGE plpgsql
+            """
+        )
+        conn.execute(
+            """
+            CREATE OR REPLACE FUNCTION refresh_anganwadi_child_table(raw_awc_code TEXT)
+            RETURNS TEXT
+            AS $$
+            DECLARE
+              code TEXT;
+              table_name TEXT;
+            BEGIN
+              code := NULLIF(BTRIM(raw_awc_code), '');
+              IF code IS NULL THEN
+                RETURN NULL;
+              END IF;
+              table_name := ensure_anganwadi_child_table(code);
+              EXECUTE format('TRUNCATE TABLE %%I', table_name);
+              EXECUTE format(
+                'INSERT INTO %%I (
+                  child_id, dob, awc_code, district, mandal, assessment_cycle
+                )
+                SELECT
+                  child_id, dob, awc_code, district, mandal, assessment_cycle
+                FROM child_profile_by_anganwadi
+                WHERE BTRIM(awc_code) = $1',
+                table_name
+              ) USING code;
+              RETURN table_name;
+            END;
+            $$ LANGUAGE plpgsql
+            """
+        )
+        conn.execute(
+            """
+            CREATE OR REPLACE FUNCTION sync_child_profile_filter_tables_fn()
+            RETURNS TRIGGER
+            AS $$
+            DECLARE
+              old_awc TEXT;
+              new_awc TEXT;
+              old_table TEXT;
+              new_table TEXT;
+            BEGIN
+              old_awc := NULL;
+              new_awc := NULL;
+              IF TG_OP IN ('UPDATE', 'DELETE') THEN
+                old_awc := NULLIF(BTRIM(COALESCE(OLD.awc_code, '')), '');
+              END IF;
+              IF TG_OP IN ('INSERT', 'UPDATE') THEN
+                new_awc := NULLIF(BTRIM(COALESCE(NEW.awc_code, '')), '');
+              END IF;
+
+              IF TG_OP = 'DELETE' THEN
+                DELETE FROM child_profile_by_district
+                WHERE child_id = OLD.child_id
+                  AND awc_code = COALESCE(BTRIM(OLD.awc_code), '');
+                DELETE FROM child_profile_by_mandal
+                WHERE child_id = OLD.child_id
+                  AND awc_code = COALESCE(BTRIM(OLD.awc_code), '');
+                DELETE FROM child_profile_by_anganwadi
+                WHERE child_id = OLD.child_id
+                  AND awc_code = COALESCE(BTRIM(OLD.awc_code), '');
+                IF old_awc IS NOT NULL THEN
+                  old_table := ensure_anganwadi_child_table(old_awc);
+                  EXECUTE format('DELETE FROM %%I WHERE child_id = $1', old_table)
+                  USING OLD.child_id;
+                END IF;
+                RETURN OLD;
+              END IF;
+
+              DELETE FROM child_profile_by_district
+              WHERE child_id = NEW.child_id
+                AND awc_code = COALESCE(BTRIM(NEW.awc_code), '');
+              DELETE FROM child_profile_by_mandal
+              WHERE child_id = NEW.child_id
+                AND awc_code = COALESCE(BTRIM(NEW.awc_code), '');
+              DELETE FROM child_profile_by_anganwadi
+              WHERE child_id = NEW.child_id
+                AND awc_code = COALESCE(BTRIM(NEW.awc_code), '');
+
+              IF COALESCE(BTRIM(NEW.district), '') <> '' THEN
+                INSERT INTO child_profile_by_district(
+                  child_id, dob, awc_code, district, mandal, assessment_cycle
+                )
+                VALUES(
+                  NEW.child_id,
+                  NEW.dob,
+                  NEW.awc_code,
+                  BTRIM(NEW.district),
+                  NULLIF(BTRIM(NEW.mandal), ''),
+                  NEW.assessment_cycle
+                );
+              END IF;
+
+              IF COALESCE(BTRIM(NEW.mandal), '') <> '' THEN
+                INSERT INTO child_profile_by_mandal(
+                  child_id, dob, awc_code, district, mandal, assessment_cycle
+                )
+                VALUES(
+                  NEW.child_id,
+                  NEW.dob,
+                  NEW.awc_code,
+                  NULLIF(BTRIM(NEW.district), ''),
+                  BTRIM(NEW.mandal),
+                  NEW.assessment_cycle
+                );
+              END IF;
+
+              IF COALESCE(BTRIM(NEW.awc_code), '') <> '' THEN
+                INSERT INTO child_profile_by_anganwadi(
+                  child_id, dob, awc_code, district, mandal, assessment_cycle
+                )
+                VALUES(
+                  NEW.child_id,
+                  NEW.dob,
+                  BTRIM(NEW.awc_code),
+                  NULLIF(BTRIM(NEW.district), ''),
+                  NULLIF(BTRIM(NEW.mandal), ''),
+                  NEW.assessment_cycle
+                );
+              END IF;
+
+              IF TG_OP = 'UPDATE' AND old_awc IS NOT NULL THEN
+                old_table := ensure_anganwadi_child_table(old_awc);
+                EXECUTE format('DELETE FROM %%I WHERE child_id = $1', old_table)
+                USING OLD.child_id;
+              END IF;
+
+              IF new_awc IS NOT NULL THEN
+                new_table := ensure_anganwadi_child_table(new_awc);
+                EXECUTE format(
+                  'INSERT INTO %%I(
+                    child_id, dob, awc_code, district, mandal, assessment_cycle
+                  )
+                  VALUES($1, $2, $3, $4, $5, $6)
+                  ON CONFLICT(child_id) DO UPDATE SET
+                    dob = EXCLUDED.dob,
+                    awc_code = EXCLUDED.awc_code,
+                    district = EXCLUDED.district,
+                    mandal = EXCLUDED.mandal,
+                    assessment_cycle = EXCLUDED.assessment_cycle',
+                  new_table
+                )
+                USING
+                  NEW.child_id,
+                  NEW.dob,
+                  BTRIM(NEW.awc_code),
+                  NULLIF(BTRIM(NEW.district), ''),
+                  NULLIF(BTRIM(NEW.mandal), ''),
+                  NEW.assessment_cycle;
+              END IF;
+
+              RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
+            """
+        )
+        conn.execute("DROP TRIGGER IF EXISTS trg_sync_child_profile_filter_tables ON child_profile")
+        conn.execute(
+            """
+            CREATE TRIGGER trg_sync_child_profile_filter_tables
+            AFTER INSERT OR UPDATE OR DELETE ON child_profile
+            FOR EACH ROW
+            EXECUTE FUNCTION sync_child_profile_filter_tables_fn()
+            """
+        )
+        _refresh_child_profile_filter_tables(conn)
 
 
 def _risk_rank(label: str) -> int:
@@ -371,48 +741,46 @@ def _parse_date_safe(value: str | None) -> date | None:
             return None
 
 
+def _child_row_with_aliases(row: Any) -> Dict[str, Any]:
+    data = dict(row)
+    awc_code = _normalize_awc_code(str(data.get("awc_code") or data.get("awc_id") or ""), prefer_prefix="AWW")
+    mandal = str(data.get("mandal") or "")
+    district = str(data.get("district") or "")
+    data["awc_code"] = awc_code
+    data["awc_id"] = _normalize_awc_code(str(data.get("awc_id") or awc_code), prefer_prefix="AWW")
+    data["sector_id"] = str(data.get("sector_id") or mandal)
+    data["mandal_id"] = str(data.get("mandal_id") or mandal)
+    data["district_id"] = str(data.get("district_id") or district)
+    data.setdefault("child_name", "")
+    data.setdefault("gender", "")
+    data.setdefault("village", "")
+    data.setdefault("age_months", 0)
+    return data
+
+
 def _save_screening(db_path: str, payload: ScreeningRequest, result: ScreeningResponse) -> None:
     created_at = datetime.utcnow().isoformat()
+    awc_code = _normalize_awc_code(payload.awc_id or payload.aww_id or "", prefer_prefix="AWW")
     with _get_conn(db_path) as conn:
         conn.execute(
             """
             INSERT INTO child_profile(
-              child_id, child_name, gender, age_months, village,
-              awc_id, awc_code, sector_id, mandal_id, mandal, district_id, district,
-              assessment_cycle, created_at, updated_at
+              child_id, dob, awc_code, district, mandal, assessment_cycle
             )
-            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            ON CONFLICT(child_id) DO UPDATE SET
-              child_name=COALESCE(NULLIF(excluded.child_name, ''), child_profile.child_name),
-              gender=COALESCE(NULLIF(excluded.gender, ''), child_profile.gender),
-              age_months=excluded.age_months,
-              village=COALESCE(NULLIF(excluded.village, ''), child_profile.village),
-              awc_id=COALESCE(NULLIF(excluded.awc_id, ''), child_profile.awc_id),
-              awc_code=COALESCE(NULLIF(excluded.awc_code, ''), child_profile.awc_code),
-              sector_id=COALESCE(NULLIF(excluded.sector_id, ''), child_profile.sector_id),
-              mandal_id=COALESCE(NULLIF(excluded.mandal_id, ''), child_profile.mandal_id),
+            VALUES(%s,%s,%s,%s,%s,%s)
+            ON CONFLICT(child_id, awc_code) DO UPDATE SET
               mandal=COALESCE(NULLIF(excluded.mandal, ''), child_profile.mandal),
-              district_id=COALESCE(NULLIF(excluded.district_id, ''), child_profile.district_id),
               district=COALESCE(NULLIF(excluded.district, ''), child_profile.district),
               assessment_cycle=COALESCE(NULLIF(excluded.assessment_cycle, ''), child_profile.assessment_cycle),
-              updated_at=excluded.updated_at
+              dob=COALESCE(excluded.dob, child_profile.dob)
             """,
             (
                 payload.child_id,
-                payload.child_name or "",
-                payload.gender or "",
-                payload.age_months,
-                payload.village or "",
-                payload.awc_id or "",
-                payload.awc_id or "",
-                payload.sector_id or "",
-                payload.mandal or "",
-                payload.mandal or "",
+                None,
+                awc_code,
                 payload.district or "",
-                payload.district or "",
+                payload.mandal or "",
                 payload.assessment_cycle or "Baseline",
-                created_at,
-                created_at,
             ),
         )
         cur = conn.execute(
@@ -669,11 +1037,14 @@ def _compute_monitoring(db_path: str, role: str, location_id: str) -> dict:
     role_to_column = {"aww": "awc_id", "supervisor": "sector_id", "cdpo": "mandal_id", "district": "district_id", "state": ""}
     filter_column = role_to_column.get(role, "")
     with _get_conn(db_path) as conn:
-        children = conn.execute("SELECT * FROM child_profile").fetchall()
+        children = [_child_row_with_aliases(c) for c in conn.execute("SELECT * FROM child_profile").fetchall()]
         if filter_column and location_id:
-            children = [c for c in children if (c[filter_column] or "") == location_id]
+            if filter_column == "awc_id":
+                children = [c for c in children if _awc_codes_equal(c.get(filter_column), location_id)]
+            else:
+                children = [c for c in children if (c.get(filter_column) or "") == location_id]
         child_ids = [c["child_id"] for c in children]
-        child_map = {c["child_id"]: dict(c) for c in children}
+        child_map = {c["child_id"]: c for c in children}
 
         screenings = conn.execute("SELECT * FROM screening_event ORDER BY created_at DESC, id DESC").fetchall()
         latest_screen_by_child: Dict[str, Dict[str, Any]] = {}
@@ -977,11 +1348,14 @@ def _compute_impact(db_path: str, role: str, location_id: str) -> dict:
         where_clause = f" WHERE c.{column} = %s "
         params = (location_id,)
     with _get_conn(db_path) as conn:
-        children = conn.execute("SELECT * FROM child_profile").fetchall()
+        children = [_child_row_with_aliases(c) for c in conn.execute("SELECT * FROM child_profile").fetchall()]
         if column and location_id:
-            children = [c for c in children if (c[column] or "") == location_id]
+            if column == "awc_id":
+                children = [c for c in children if _awc_codes_equal(c.get(column), location_id)]
+            else:
+                children = [c for c in children if (c.get(column) or "") == location_id]
         child_ids = [c["child_id"] for c in children]
-        child_map = {c["child_id"]: dict(c) for c in children}
+        child_map = {c["child_id"]: c for c in children}
         rows = conn.execute("SELECT * FROM followup_outcome").fetchall()
         rows = [r for r in rows if r["child_id"] in child_map]
         screenings = conn.execute("SELECT * FROM screening_event ORDER BY created_at ASC, id ASC").fetchall()
@@ -1043,13 +1417,28 @@ def _generate_follow_up_activities(db_path: str, referral_id: str, child_id: str
     activities = []
     activity_id = 1
 
+    def _domain_has_delay(raw_score: Any) -> bool:
+        # Accept both label-based scores ("High") and numeric scores (0/1 or 0.0-1.0).
+        normalized = _normalize_risk(str(raw_score))
+        if normalized in {"Medium", "High", "Critical"}:
+            return True
+        try:
+            value = float(raw_score)
+        except (TypeError, ValueError):
+            return False
+        # Binary format: 1 means delayed.
+        if value in {0.0, 1.0}:
+            return int(value) == 1
+        # App convention in referral payloads:
+        # lower score indicates higher concern (e.g., 0.35 delayed, 0.9 normal).
+        return value <= 0.5
+
     # Extract delay information from domain scores
     delayed_domains = []
     for domain, risk in domain_scores.items():
         domain_upper = str(domain).upper().strip()
         if domain_upper in {"GM", "FM", "LC", "COG", "SE"}:
-            risk_normalized = _normalize_risk(str(risk))
-            if risk_normalized in {"High", "Critical", "Medium"}:
+            if _domain_has_delay(risk):
                 delayed_domains.append(domain_upper)
 
     # Rule 1: Gross Motor Delay → Daily floor play activities
@@ -1156,6 +1545,33 @@ def _generate_follow_up_activities(db_path: str, referral_id: str, child_id: str
         })
         activity_id += 1
 
+    # Fallback: keep follow-up tracking meaningful even when domain score format
+    # is sparse/legacy and no domain activity was inferred.
+    if not activities and _normalize_risk(risk_level) in {"Medium", "High", "Critical"}:
+        activities.append({
+            "id": activity_id,
+            "referral_id": referral_id,
+            "target_user": "CAREGIVER",
+            "domain": "General",
+            "activity_title": "Daily Guided Stimulation at Home",
+            "activity_description": "Practice age-appropriate play, communication, and interaction tasks daily. Track changes and concerns.",
+            "frequency": "DAILY",
+            "duration_days": 30,
+            "created_on": datetime.utcnow().date().isoformat(),
+        })
+        activity_id += 1
+        activities.append({
+            "id": activity_id,
+            "referral_id": referral_id,
+            "target_user": "AWW",
+            "domain": "General",
+            "activity_title": "Weekly Follow-Up Counselling & Review",
+            "activity_description": "Review caregiver adherence, reinforce techniques, and document weekly developmental observations.",
+            "frequency": "WEEKLY",
+            "duration_days": 30,
+            "created_on": datetime.utcnow().date().isoformat(),
+        })
+
     # Save activities to database
     with _get_conn(db_path) as conn:
         for activity in activities:
@@ -1222,9 +1638,6 @@ def create_app() -> FastAPI:
             "'postgresql://<user>:<password>@127.0.0.1:5432/ecd_data'."
         ) from exc
 
-    if build_ecd_chatbot_router is None:
-        raise RuntimeError("ECD chatbot API module is missing; ensure app/ecd_chatbot_api.py is present.")
-    app.include_router(build_ecd_chatbot_router(db_path))
     # Simple in-memory store for tasks/checklists (child_id -> data)
     tasks_store: Dict[str, Dict] = {}
     # In-memory activity assignment + tracking store for Problem B engine
@@ -1286,32 +1699,159 @@ def create_app() -> FastAPI:
 
     @app.post("/auth/login", response_model=LoginResponse)
     def login(payload: LoginRequest) -> LoginResponse:
-        if len(payload.mobile_number.strip()) != 10 or not payload.mobile_number.strip().isdigit():
-            raise HTTPException(status_code=400, detail="Invalid mobile number")
+        awc_code = _normalize_awc_code(payload.awc_code or payload.mobile_number or "", prefer_prefix="AWW")
+        if not awc_code:
+            raise HTTPException(status_code=400, detail="AWC code is required")
+        if not _AWC_DEMO_PATTERN.fullmatch(awc_code):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid AWC code. Use format AWW_DEMO_XXXX",
+            )
         if not payload.password.strip():
             raise HTTPException(status_code=400, detail="Password is required")
+
+        awc_variants = _awc_code_variants(awc_code)
+        if not awc_variants:
+            awc_variants = [awc_code]
+        placeholders = ",".join("%s" for _ in awc_variants)
+        with get_conn(db_path) as conn:
+            row = conn.execute(
+                f"""
+                SELECT password
+                FROM aww_profile
+                WHERE UPPER(BTRIM(awc_code)) IN ({placeholders})
+                LIMIT 1
+                """,
+                tuple(awc_variants),
+            ).fetchone()
+            if row is not None:
+                saved_password = str(row.get("password") or "")
+                if saved_password != payload.password:
+                    raise HTTPException(status_code=401, detail="Invalid credentials")
+
         token = f"demo_jwt_{uuid.uuid4().hex}"
-        return LoginResponse(token=token, user_id=f"aww_{payload.mobile_number}")
+        return LoginResponse(token=token, user_id=f"aww_{awc_code.lower()}")
+
+    @app.get("/auth/profile")
+    def get_aww_profile(awc_code: str) -> dict:
+        normalized_awc_code = _normalize_awc_code(awc_code, prefer_prefix="AWW")
+        if not normalized_awc_code:
+            raise HTTPException(status_code=400, detail="AWC code is required")
+
+        awc_variants = _awc_code_variants(normalized_awc_code) or [normalized_awc_code]
+        placeholders = ",".join("%s" for _ in awc_variants)
+        with get_conn(db_path) as conn:
+            profile_row = conn.execute(
+                f"""
+                SELECT
+                    aww_id,
+                    name,
+                    mobile_number,
+                    awc_code,
+                    mandal,
+                    district,
+                    created_at,
+                    updated_at
+                FROM aww_profile
+                WHERE UPPER(BTRIM(awc_code)) IN ({placeholders})
+                ORDER BY COALESCE(NULLIF(BTRIM(updated_at), ''), NULLIF(BTRIM(created_at), '')) DESC,
+                         aww_id DESC
+                LIMIT 1
+                """,
+                tuple(awc_variants),
+            ).fetchone()
+
+            if profile_row is not None:
+                profile = dict(profile_row)
+                profile["awc_code"] = _normalize_awc_code(
+                    profile.get("awc_code") or normalized_awc_code,
+                    prefer_prefix="AWW",
+                ) or normalized_awc_code
+                profile["district"] = str(profile.get("district") or "").strip()
+                profile["mandal"] = str(profile.get("mandal") or "").strip()
+                return {"status": "ok", "source": "aww_profile", "profile": profile}
+
+            inferred_row = conn.execute(
+                f"""
+                SELECT
+                    NULLIF(BTRIM(district), '') AS district,
+                    NULLIF(BTRIM(mandal), '') AS mandal,
+                    COUNT(*) AS row_count
+                FROM child_profile
+                WHERE UPPER(BTRIM(awc_code)) IN ({placeholders})
+                  AND (
+                      COALESCE(BTRIM(district), '') <> ''
+                      OR COALESCE(BTRIM(mandal), '') <> ''
+                  )
+                GROUP BY NULLIF(BTRIM(district), ''), NULLIF(BTRIM(mandal), '')
+                ORDER BY row_count DESC, district NULLS LAST, mandal NULLS LAST
+                LIMIT 1
+                """,
+                tuple(awc_variants),
+            ).fetchone()
+
+            if inferred_row is None:
+                raise HTTPException(status_code=404, detail="AWW profile not found")
+
+            profile = {
+                "aww_id": f"aww_{normalized_awc_code.lower()}",
+                "name": normalized_awc_code,
+                "mobile_number": "",
+                "awc_code": normalized_awc_code,
+                "district": str(inferred_row.get("district") or "").strip(),
+                "mandal": str(inferred_row.get("mandal") or "").strip(),
+                "created_at": "",
+                "updated_at": "",
+            }
+            return {"status": "ok", "source": "child_profile", "profile": profile}
 
     @app.post("/auth/register")
     def register_aww(payload: RegistrationRequest) -> dict:
         """Register a new AWW (Anganwadi Worker) to PostgreSQL database."""
         try:
-            if not payload.name.strip():
-                raise HTTPException(status_code=400, detail="Name is required")
-            if len(payload.mobile_number.strip()) != 10 or not payload.mobile_number.strip().isdigit():
-                raise HTTPException(status_code=400, detail="Invalid mobile number - must be 10 digits")
             if not payload.password.strip():
                 raise HTTPException(status_code=400, detail="Password is required")
-            if not payload.awc_code.strip():
+            normalized_awc_code = _normalize_awc_code(payload.awc_code, prefer_prefix="AWW")
+            if not normalized_awc_code:
                 raise HTTPException(status_code=400, detail="AWC code is required")
+            district = (payload.district or "").strip()
+            mandal = (payload.mandal or "").strip()
+            if not district or not mandal:
+                raise HTTPException(
+                    status_code=400,
+                    detail="District and mandal are required",
+                )
+            display_name = (payload.name or "").strip() or normalized_awc_code
+            mobile_number = (payload.mobile_number or "").strip()
+            awc_variants = _awc_code_variants(normalized_awc_code) or [normalized_awc_code]
 
-            aww_id = f"aww_{payload.mobile_number}"
+            aww_id = f"aww_{uuid.uuid4().hex[:12]}"
             created_at = datetime.utcnow().isoformat()
             updated_at = datetime.utcnow().isoformat()
 
-            # Insert into PostgreSQL ecd_data.aww_profile
+            # Insert into PostgreSQL ecd_data.aww_profile.
+            # Enforce one-time registration for the same AWC + district + mandal tuple.
             with get_conn(db_path) as conn:
+                placeholders = ",".join("%s" for _ in awc_variants)
+                existing = conn.execute(
+                    f"""
+                    SELECT aww_id
+                    FROM aww_profile
+                    WHERE UPPER(BTRIM(awc_code)) IN ({placeholders})
+                      AND LOWER(BTRIM(COALESCE(district, ''))) = LOWER(%s)
+                      AND LOWER(BTRIM(COALESCE(mandal, ''))) = LOWER(%s)
+                    LIMIT 1
+                    """,
+                    tuple([*awc_variants, district, mandal]),
+                ).fetchone()
+                if existing is not None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "AWW already registered for this AWC code, district and mandal"
+                        ),
+                    )
+
                 conn.execute(
                     """
                     INSERT INTO aww_profile(
@@ -1319,33 +1859,28 @@ def create_app() -> FastAPI:
                       mandal, district, created_at, updated_at
                     )
                     VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT(mobile_number) DO UPDATE SET
-                      name=EXCLUDED.name,
-                      password=EXCLUDED.password,
-                      awc_code=EXCLUDED.awc_code,
-                      mandal=EXCLUDED.mandal,
-                      district=EXCLUDED.district,
-                      updated_at=EXCLUDED.updated_at
                     """,
                     (
                         aww_id,
-                        payload.name.strip(),
-                        payload.mobile_number.strip(),
+                        display_name,
+                        mobile_number or None,
                         payload.password,
-                        payload.awc_code.strip(),
-                        payload.mandal or "",
-                        payload.district or "",
+                        normalized_awc_code,
+                        mandal,
+                        district,
                         created_at,
                         updated_at,
                     ),
                 )
-            
+             
             return {
                 "status": "ok",
                 "message": "AWW registered successfully",
                 "aww_id": aww_id,
                 "created_at": created_at,
             }
+        except HTTPException:
+            raise
         except Exception as exc:
             print(f"❌ Registration error: {exc}")
             raise HTTPException(status_code=500, detail=f"Registration failed: {str(exc)}")
@@ -1358,25 +1893,40 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="child_id is required")
 
         dob = (payload.date_of_birth or payload.dob or "").strip() or None
-        awc_code = (payload.awc_id or payload.awc_code or "").strip() or "AWS_DEMO_001"
+        awc_code = _normalize_awc_code(payload.awc_id or payload.awc_code or "", prefer_prefix="AWW") or "AWW_DEMO_001"
         district = (payload.district_id or payload.district or "").strip() or ""
         mandal = (payload.mandal_id or payload.mandal or "").strip() or ""
         assessment_cycle = (payload.assessment_cycle or "Baseline").strip()
+        awc_variants = _awc_code_variants(awc_code) or [awc_code]
 
         try:
             with _get_conn(db_path) as conn:
+                placeholders = ",".join("%s" for _ in awc_variants)
+                existing = conn.execute(
+                    f"""
+                    SELECT child_id, awc_code
+                    FROM child_profile
+                    WHERE child_id = %s
+                      AND UPPER(BTRIM(awc_code)) IN ({placeholders})
+                    LIMIT 1
+                    """,
+                    tuple([child_id, *awc_variants]),
+                ).fetchone()
+                if existing is not None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"child_id '{child_id}' already exists in anganwadi '{awc_code}'. "
+                            "Use a different child_id for this anganwadi."
+                        ),
+                    )
+
                 conn.execute(
                     """
                     INSERT INTO child_profile(
                       child_id, dob, awc_code, district, mandal, assessment_cycle
                     )
                     VALUES(%s, %s, %s, %s, %s, %s)
-                    ON CONFLICT(child_id) DO UPDATE SET
-                      dob=EXCLUDED.dob,
-                      awc_code=EXCLUDED.awc_code,
-                      district=EXCLUDED.district,
-                      mandal=EXCLUDED.mandal,
-                      assessment_cycle=EXCLUDED.assessment_cycle
                     """,
                     (
                         child_id,
@@ -1392,10 +1942,10 @@ def create_app() -> FastAPI:
                     """
                     SELECT child_id, dob, awc_code, district, mandal, assessment_cycle
                     FROM child_profile
-                    WHERE child_id = %s
+                    WHERE child_id = %s AND awc_code = %s
                     LIMIT 1
                     """,
-                    (child_id,),
+                    (child_id, awc_code),
                 ).fetchone()
 
             return {
@@ -1403,6 +1953,8 @@ def create_app() -> FastAPI:
                 "message": "Child profile registered successfully",
                 "child": dict(row) if row else {"child_id": child_id}
             }
+        except HTTPException:
+            raise
         except Exception as exc:
             print(f"❌ Child registration error: {exc}")
             raise HTTPException(status_code=500, detail=f"Child registration failed: {str(exc)}")
@@ -1412,35 +1964,106 @@ def create_app() -> FastAPI:
         with _get_conn(db_path) as conn:
             row = conn.execute(
                 """
-                SELECT child_id, child_name, gender, age_months, dob,
-                       awc_id, awc_code, mandal_id, mandal, district_id, district,
-                       assessment_cycle, created_at, updated_at
-                FROM child_profile
-                WHERE child_id = %s
+                SELECT
+                    c.child_id,
+                    c.dob,
+                    c.awc_code,
+                    c.mandal,
+                    c.district,
+                    c.assessment_cycle,
+                    se.age_months
+                FROM child_profile c
+                LEFT JOIN LATERAL (
+                    SELECT age_months
+                    FROM screening_event s
+                    WHERE s.child_id = c.child_id
+                    ORDER BY s.created_at DESC, s.id DESC
+                    LIMIT 1
+                ) se ON TRUE
+                WHERE c.child_id = %s
                 LIMIT 1
                 """,
                 (child_id,),
             ).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="Child not found")
-        return dict(row)
+        child = _child_row_with_aliases(row)
+        age_months = int(child.get("age_months") or 0)
+        return {
+            "child_id": child["child_id"],
+            "child_name": child.get("child_name") or child["child_id"],
+            "gender": child.get("gender") or "",
+            "age_months": age_months,
+            "dob": child.get("dob"),
+            "awc_id": child.get("awc_id") or "",
+            "awc_code": child.get("awc_code") or "",
+            "mandal_id": child.get("mandal_id") or "",
+            "mandal": child.get("mandal") or "",
+            "district_id": child.get("district_id") or "",
+            "district": child.get("district") or "",
+            "assessment_cycle": child.get("assessment_cycle") or "Baseline",
+            "created_at": None,
+            "updated_at": None,
+        }
 
     @app.get("/children")
-    def list_children(limit: int = 200) -> dict:
+    def list_children(limit: int = 200, awc_code: Optional[str] = None) -> dict:
         safe_limit = max(1, min(limit, 1000))
+        awc_variants = _awc_code_variants(awc_code)
+        where_sql = ""
+        query_params: List[Any] = []
+        if awc_variants:
+            placeholders = ",".join("%s" for _ in awc_variants)
+            where_sql = f"WHERE UPPER(BTRIM(c.awc_code)) IN ({placeholders})"
+            query_params.extend(awc_variants)
+        query_params.append(safe_limit)
         with _get_conn(db_path) as conn:
             rows = conn.execute(
-                """
-                SELECT child_id, child_name, gender, age_months, dob,
-                       awc_id, awc_code, mandal_id, mandal, district_id, district,
-                       assessment_cycle, created_at, updated_at
-                FROM child_profile
-                ORDER BY created_at DESC, child_id DESC
+                f"""
+                SELECT
+                    c.child_id,
+                    c.dob,
+                    c.awc_code,
+                    c.mandal,
+                    c.district,
+                    c.assessment_cycle,
+                    se.age_months
+                FROM child_profile c
+                LEFT JOIN LATERAL (
+                    SELECT age_months
+                    FROM screening_event s
+                    WHERE s.child_id = c.child_id
+                    ORDER BY s.created_at DESC, s.id DESC
+                    LIMIT 1
+                ) se ON TRUE
+                {where_sql}
+                ORDER BY c.child_id DESC
                 LIMIT %s
                 """,
-                (safe_limit,),
+                tuple(query_params),
             ).fetchall()
-        return {"count": len(rows), "items": [dict(r) for r in rows]}
+        items = []
+        for row in rows:
+            child = _child_row_with_aliases(row)
+            items.append(
+                {
+                    "child_id": child["child_id"],
+                    "child_name": child.get("child_name") or child["child_id"],
+                    "gender": child.get("gender") or "",
+                    "age_months": int(child.get("age_months") or 0),
+                    "dob": child.get("dob"),
+                    "awc_id": child.get("awc_id") or "",
+                    "awc_code": child.get("awc_code") or "",
+                    "mandal_id": child.get("mandal_id") or "",
+                    "mandal": child.get("mandal") or "",
+                    "district_id": child.get("district_id") or "",
+                    "district": child.get("district") or "",
+                    "assessment_cycle": child.get("assessment_cycle") or "Baseline",
+                    "created_at": None,
+                    "updated_at": None,
+                }
+            )
+        return {"count": len(items), "items": items}
 
     @app.post("/screening/submit", response_model=ScreeningResponse)
     def submit_screening(payload: ScreeningRequest) -> ScreeningResponse:
@@ -1656,16 +2279,30 @@ def create_app() -> FastAPI:
 
             child = conn.execute(
                 """
-                SELECT child_id, child_name, gender, age_months, village, awc_id
-                FROM child_profile
-                WHERE child_id = %s
+                SELECT
+                    c.child_id,
+                    c.dob,
+                    c.awc_code,
+                    c.mandal,
+                    c.district,
+                    c.assessment_cycle,
+                    se.age_months
+                FROM child_profile c
+                LEFT JOIN LATERAL (
+                    SELECT age_months
+                    FROM screening_event s
+                    WHERE s.child_id = c.child_id
+                    ORDER BY s.created_at DESC, s.id DESC
+                    LIMIT 1
+                ) se ON TRUE
+                WHERE c.child_id = %s
                 LIMIT 1
                 """,
                 (child_id,),
             ).fetchone()
             screen = conn.execute(
                 """
-                SELECT id, overall_risk, explainability
+                SELECT id, overall_risk, explainability, age_months
                 FROM screening_event
                 WHERE child_id = %s
                 ORDER BY created_at DESC, id DESC
@@ -1744,16 +2381,23 @@ def create_app() -> FastAPI:
                 escalation_level=referral["escalation_level"],
             )
 
+        child_info_row = _child_row_with_aliases(child) if child else {}
+        age_value = int(child_info_row.get("age_months") or 0)
+        if age_value <= 0 and screen is not None:
+            age_value = int(screen["age_months"] or 0)
+
         return {
             "referral_id": referral["referral_id"],
             "child_info": {
-                "name": str(child["child_name"] or child_id) if child else child_id,
+                "name": str(child_info_row.get("child_name") or child_id),
                 "child_id": child_id,
-                "age": int(child["age_months"] or 0) if child else 0,
-                "gender": str(child["gender"] or "Unknown") if child else "Unknown",
+                "age": age_value,
+                "gender": str(child_info_row.get("gender") or "Unknown"),
                 "village_or_awc_id": str(
-                    child["village"] or child["awc_id"] or "N/A"
-                ) if child else "N/A",
+                    child_info_row.get("village")
+                    or child_info_row.get("awc_id")
+                    or "N/A"
+                ),
                 "assigned_worker": str(referral["aww_id"] or "N/A"),
             },
             "risk_summary": {
@@ -1864,10 +2508,6 @@ def create_app() -> FastAPI:
     @app.get("/problem-b/rules")
     def problem_b_rules():
         return rule_logic_table()
-
-    @app.get("/problem-b/schema")
-    def problem_b_schema():
-        return schema_tables()
 
     @app.get("/problem-b/system-flow")
     def problem_b_system_flow():
@@ -2117,6 +2757,46 @@ def create_app() -> FastAPI:
                     payload.worker_id,
                 ),
             )
+
+            # Keep activity tracking in sync with referral lifecycle.
+            # If referral is completed, mark any pending follow-up activities completed.
+            if status == "Completed":
+                activity_rows = conn.execute(
+                    """
+                    SELECT id
+                    FROM follow_up_activities
+                    WHERE referral_id = %s
+                    """,
+                    (referral_id,),
+                ).fetchall()
+                completed_rows = conn.execute(
+                    """
+                    SELECT DISTINCT activity_id
+                    FROM follow_up_log
+                    WHERE referral_id = %s AND completed = 1
+                    """,
+                    (referral_id,),
+                ).fetchall()
+                completed_ids = {int(r["activity_id"]) for r in completed_rows}
+                completion_stamp = completion_date or today
+                for r in activity_rows:
+                    activity_id = int(r["id"])
+                    if activity_id in completed_ids:
+                        continue
+                    conn.execute(
+                        """
+                        INSERT INTO follow_up_log (
+                            referral_id, activity_id, completed, completed_on, remarks
+                        ) VALUES (%s, %s, %s, %s, %s)
+                        """,
+                        (
+                            referral_id,
+                            activity_id,
+                            1,
+                            completion_stamp,
+                            "Auto-completed when referral status moved to Completed.",
+                        ),
+                    )
         referral_status_store[referral_id] = _status_to_frontend(status)
         return {
             "status": "ok",
@@ -2246,11 +2926,14 @@ def create_app() -> FastAPI:
 
         # Build activity completion map
         log_map = {int(log["activity_id"]): log for log in activity_logs}
+        status_frontend = _status_to_frontend(referral["referral_status"])
+        force_completed = status_frontend == "COMPLETED"
 
         # Format response
         formatted_activities = []
         for act in activities:
             log = log_map.get(act["id"], {})
+            is_completed = force_completed or (log.get("completed", 0) == 1)
             formatted_activities.append({
                 "id": act["id"],
                 "target_user": act["target_user"],
@@ -2259,7 +2942,7 @@ def create_app() -> FastAPI:
                 "description": act["activity_description"],
                 "frequency": act["frequency"],
                 "duration_days": act["duration_days"],
-                "completed": log.get("completed", 0) == 1,
+                "completed": is_completed,
                 "completed_on": log.get("completed_on"),
                 "remarks": log.get("remarks"),
             })
@@ -2268,14 +2951,20 @@ def create_app() -> FastAPI:
         deadline = _parse_date_safe(referral["followup_deadline"])
         today = datetime.utcnow().date()
         days_remaining = (deadline - today).days if deadline else 0
-        is_overdue = days_remaining < 0 and _status_to_frontend(referral["referral_status"]) != "COMPLETED"
+        is_overdue = days_remaining < 0 and status_frontend != "COMPLETED"
+        total_activities = len(formatted_activities)
+        completed_activities = sum(1 for a in formatted_activities if a["completed"])
+        if total_activities > 0:
+            completion_percent = int((completed_activities / total_activities) * 100)
+        else:
+            completion_percent = 100 if status_frontend == "COMPLETED" else 0
 
         return {
             "referral_id": referral_id,
             "child_id": referral["child_id"],
             "facility": referral["referral_type"],
             "urgency": referral["urgency"],
-            "status": _status_to_frontend(referral["referral_status"]),
+            "status": status_frontend,
             "created_on": referral["referral_date"],
             "deadline": referral["followup_deadline"],
             "days_remaining": days_remaining,
@@ -2283,8 +2972,10 @@ def create_app() -> FastAPI:
             "escalation_level": referral["escalation_level"],
             "escalated_to": referral["escalated_to"],
             "activities": formatted_activities,
-            "total_activities": len(formatted_activities),
-            "completed_activities": sum(1 for a in formatted_activities if a["completed"]),
+            "total_activities": total_activities,
+            "completed_activities": completed_activities,
+            "completion_percent": completion_percent,
+            "progress": float(completion_percent),
         }
 
     class CompleteActivityRequest(BaseModel):

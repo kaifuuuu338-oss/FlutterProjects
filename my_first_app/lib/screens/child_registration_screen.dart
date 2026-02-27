@@ -8,6 +8,7 @@ import 'package:my_first_app/screens/dashboard_screen.dart';
 import 'package:my_first_app/screens/result_screen.dart';
 import 'package:my_first_app/screens/settings_screen.dart';
 import 'package:my_first_app/services/api_service.dart';
+import 'package:my_first_app/services/auth_service.dart';
 import 'package:my_first_app/services/local_db_service.dart';
 import 'package:my_first_app/widgets/language_menu_button.dart';
 
@@ -24,17 +25,15 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
 
   final _formKey = GlobalKey<FormState>();
   final APIService _api = APIService();
+  final AuthService _auth = AuthService();
   final LocalDBService _localDb = LocalDBService();
   final TextEditingController _childIdController = TextEditingController(
-    text: 'child_${DateTime.now().millisecondsSinceEpoch}',
+    text: 'child_001',
   );
   final TextEditingController _awcCodeController = TextEditingController(
-    text: 'AWS_DEMO_001',
+    text: 'AWW_DEMO_001',
   );
   final TextEditingController _dobController = TextEditingController();
-  final TextEditingController _birthHistoryController = TextEditingController();
-  final TextEditingController _healthHistoryController =
-      TextEditingController();
 
   DateTime? _dob;
   final String _gender = 'M';
@@ -42,14 +41,188 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
   String? _district;
   String? _mandal;
   int _ageMonths = 0;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLoggedInUserData();
+  }
+
+  Future<void> _loadLoggedInUserData() async {
+    try {
+      final aww = await _auth.getCurrentUserAww();
+      final savedAwcCode =
+          (await _auth.getLoggedInAwcCode() ?? '').trim().toUpperCase();
+      final resolvedAwcCode = aww?.awcCode.trim().isNotEmpty == true
+          ? aww!.awcCode.trim().toUpperCase()
+          : savedAwcCode;
+      final mappedLocation = resolvedAwcCode.isNotEmpty
+          ? AppConstants.getAwcMapping(resolvedAwcCode)
+          : const <String, String>{};
+
+      final profileLocation = await _loadLocationFromBackendProfile(
+        resolvedAwcCode,
+      );
+      final childrenLocation = await _inferLocationFromRegisteredChildren(
+        resolvedAwcCode,
+      );
+
+      final rawDistrict = profileLocation['district']!.isNotEmpty
+          ? profileLocation['district']!
+          : childrenLocation['district']!.isNotEmpty
+              ? childrenLocation['district']!
+              : (aww?.district ?? '').trim().isNotEmpty
+                  ? aww!.district.trim()
+                  : (mappedLocation['district'] ?? '').trim();
+      final rawMandal = profileLocation['mandal']!.isNotEmpty
+          ? profileLocation['mandal']!
+          : childrenLocation['mandal']!.isNotEmpty
+              ? childrenLocation['mandal']!
+              : (aww?.mandal ?? '').trim().isNotEmpty
+                  ? aww!.mandal.trim()
+                  : (mappedLocation['mandal'] ?? '').trim();
+
+      String? resolvedDistrict = _canonicalDistrict(rawDistrict);
+      String? resolvedMandal = _canonicalMandal(resolvedDistrict, rawMandal);
+
+      if (resolvedMandal == null && rawMandal.isNotEmpty) {
+        final districtByMandal = _findDistrictByMandal(rawMandal);
+        if (districtByMandal != null) {
+          resolvedDistrict = districtByMandal;
+          resolvedMandal = _canonicalMandal(resolvedDistrict, rawMandal);
+        }
+      }
+
+      if (resolvedDistrict != null && resolvedMandal == null) {
+        final fallbacks = _mandalsForDistrictName(resolvedDistrict);
+        if (fallbacks.isNotEmpty) {
+          resolvedMandal = fallbacks.first;
+        }
+      }
+
+      if (resolvedAwcCode.isNotEmpty &&
+          resolvedDistrict != null &&
+          resolvedMandal != null) {
+        await _auth.saveLoggedInAwwProfile(
+          awcCode: resolvedAwcCode,
+          district: resolvedDistrict,
+          mandal: resolvedMandal,
+        );
+      }
+
+      if (mounted) {
+        setState(() {
+          if (resolvedAwcCode.isNotEmpty) {
+            _awcCodeController.text = resolvedAwcCode;
+          }
+          _district = resolvedDistrict;
+          _mandal = resolvedMandal;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      print('Error loading user data: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<Map<String, String>> _loadLocationFromBackendProfile(
+    String awcCode,
+  ) async {
+    if (awcCode.trim().isEmpty) {
+      return const {'district': '', 'mandal': ''};
+    }
+    try {
+      final profile = await _api.getAwwProfile(awcCode);
+      if (profile == null) {
+        return const {'district': '', 'mandal': ''};
+      }
+      return {
+        'district': (profile['district'] ?? '').toString().trim(),
+        'mandal': (profile['mandal'] ?? '').toString().trim(),
+      };
+    } catch (_) {
+      return const {'district': '', 'mandal': ''};
+    }
+  }
+
+  Future<Map<String, String>> _inferLocationFromRegisteredChildren(
+    String awcCode,
+  ) async {
+    if (awcCode.trim().isEmpty) {
+      return const {'district': '', 'mandal': ''};
+    }
+    try {
+      final items = await _api.getRegisteredChildren(limit: 200, awcCode: awcCode);
+      if (items.isEmpty) {
+        return const {'district': '', 'mandal': ''};
+      }
+
+      final counts = <String, int>{};
+      for (final row in items) {
+        final district = (row['district'] ?? row['district_id'] ?? '')
+            .toString()
+            .trim();
+        final mandal = (row['mandal'] ?? row['mandal_id'] ?? '')
+            .toString()
+            .trim();
+        if (district.isEmpty || mandal.isEmpty) continue;
+        final key = '${district.toLowerCase()}|${mandal.toLowerCase()}';
+        counts[key] = (counts[key] ?? 0) + 1;
+      }
+      if (counts.isEmpty) {
+        return const {'district': '', 'mandal': ''};
+      }
+
+      String? bestKey;
+      int bestCount = -1;
+      counts.forEach((key, value) {
+        if (value > bestCount) {
+          bestKey = key;
+          bestCount = value;
+        }
+      });
+      if (bestKey == null) {
+        return const {'district': '', 'mandal': ''};
+      }
+      final parts = bestKey!.split('|');
+      if (parts.length != 2) {
+        return const {'district': '', 'mandal': ''};
+      }
+
+      final bestDistrict = items
+          .map((row) => (row['district'] ?? row['district_id'] ?? '')
+              .toString()
+              .trim())
+          .firstWhere(
+            (d) => d.toLowerCase() == parts[0],
+            orElse: () => parts[0],
+          );
+      final bestMandal = items
+          .map((row) => (row['mandal'] ?? row['mandal_id'] ?? '')
+              .toString()
+              .trim())
+          .firstWhere(
+            (m) => m.toLowerCase() == parts[1],
+            orElse: () => parts[1],
+          );
+
+      return {'district': bestDistrict, 'mandal': bestMandal};
+    } catch (_) {
+      return const {'district': '', 'mandal': ''};
+    }
+  }
 
   @override
   void dispose() {
     _childIdController.dispose();
     _awcCodeController.dispose();
     _dobController.dispose();
-    _birthHistoryController.dispose();
-    _healthHistoryController.dispose();
     super.dispose();
   }
 
@@ -62,14 +235,6 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
     final month = date.month.toString().padLeft(2, '0');
     final day = date.day.toString().padLeft(2, '0');
     return '${date.year}-$month-$day';
-  }
-
-  List<String> _parseHistoryItems(String raw) {
-    return raw
-        .split(RegExp(r'[\n,;]+'))
-        .map((item) => item.trim())
-        .where((item) => item.isNotEmpty)
-        .toList();
   }
 
   Future<void> _pickDob() async {
@@ -88,15 +253,89 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
     });
   }
 
+  List<String> _uniqueNonEmpty(Iterable<String> values) {
+    final seen = <String>{};
+    final result = <String>[];
+    for (final raw in values) {
+      final value = raw.trim();
+      if (value.isEmpty) continue;
+      final key = value.toLowerCase();
+      if (seen.add(key)) {
+        result.add(value);
+      }
+    }
+    return result;
+  }
+
+  List<String> _mandalsForDistrictName(String district) {
+    return _uniqueNonEmpty(
+      AppConstants.apDistrictMandals[district] ?? const <String>[],
+    );
+  }
+
+  String? _canonicalDistrict(String? district) {
+    final candidate = (district ?? '').trim();
+    if (candidate.isEmpty) return null;
+    for (final item in _districts) {
+      if (item.toLowerCase() == candidate.toLowerCase()) {
+        return item;
+      }
+    }
+    return null;
+  }
+
+  String? _canonicalMandal(String? district, String? mandal) {
+    final districtValue = _canonicalDistrict(district);
+    final mandalValue = (mandal ?? '').trim();
+    if (districtValue == null || mandalValue.isEmpty) return null;
+    final mandals = _mandalsForDistrictName(districtValue);
+    for (final item in mandals) {
+      if (item.toLowerCase() == mandalValue.toLowerCase()) {
+        return item;
+      }
+    }
+    for (final item in mandals) {
+      if (item.toLowerCase().startsWith(mandalValue.toLowerCase())) {
+        return item;
+      }
+    }
+    return null;
+  }
+
+  String? _findDistrictByMandal(String mandal) {
+    final target = mandal.trim();
+    if (target.isEmpty) return null;
+
+    for (final district in _districts) {
+      final mandals = _mandalsForDistrictName(district);
+      for (final item in mandals) {
+        if (item.toLowerCase() == target.toLowerCase()) {
+          return district;
+        }
+      }
+    }
+
+    for (final district in _districts) {
+      final mandals = _mandalsForDistrictName(district);
+      for (final item in mandals) {
+        if (item.toLowerCase().startsWith(target.toLowerCase())) {
+          return district;
+        }
+      }
+    }
+    return null;
+  }
+
   List<String> get _districts {
-    final items = AppConstants.apDistrictMandals.keys.toList();
-    items.sort();
+    final items = _uniqueNonEmpty(AppConstants.apDistrictMandals.keys);
+    items.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
     return items;
   }
 
   List<String> get _mandalsForDistrict {
-    if (_district == null) return const [];
-    return AppConstants.apDistrictMandals[_district] ?? const [];
+    final district = _canonicalDistrict(_district);
+    if (district == null) return const [];
+    return _mandalsForDistrictName(district);
   }
 
   Future<void> _registerChild() async {
@@ -118,6 +357,37 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
         ),
       );
       return;
+    }
+
+    // Check for duplicate registration
+    final awcCode = _awcCodeController.text.trim();
+    try {
+      final existingChildren = await _api.getRegisteredChildren(awcCode: awcCode);
+      
+      // Check if a child with same district, mandal, and awc_code already exists
+      final isDuplicate = existingChildren.any((child) {
+        final childDistrict = child['district']?.toString().trim() ?? '';
+        final childMandal = child['mandal']?.toString().trim() ?? '';
+        final childAwcCode = child['awc_code']?.toString().trim().toUpperCase() ?? '';
+        
+        return childDistrict.toLowerCase() == _district!.toLowerCase() &&
+               childMandal.toLowerCase() == _mandal!.toLowerCase() &&
+               childAwcCode == awcCode.toUpperCase();
+      });
+
+      if (isDuplicate) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('USER already exist'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+    } catch (e) {
+      // If we can't check for duplicates, log the error but continue
+      print('Error checking for duplicate registration: $e');
     }
 
     final child = ChildModel(
@@ -170,8 +440,6 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
           childId: child.childId,
           ageMonths: child.ageMonths,
           awwId: child.awwId,
-          birthHistory: _parseHistoryItems(_birthHistoryController.text),
-          healthHistory: _parseHistoryItems(_healthHistoryController.text),
         ),
       ),
     );
@@ -491,6 +759,7 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
 
                       TextFormField(
                         controller: _awcCodeController,
+                        readOnly: true,
                         decoration: InputDecoration(
                           labelText: AppLocalizations.of(context).t('awc_code'),
                           prefixIcon: const Icon(Icons.home_outlined),
@@ -503,30 +772,11 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                       ),
                       const SizedBox(height: 12),
 
-                      TextFormField(
-                        controller: _birthHistoryController,
-                        maxLines: 2,
-                        decoration: const InputDecoration(
-                          labelText: 'Birth history (optional)',
-                          hintText: 'e.g. preterm, NICU stay',
-                          prefixIcon: Icon(Icons.monitor_heart_outlined),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-
-                      TextFormField(
-                        controller: _healthHistoryController,
-                        maxLines: 2,
-                        decoration: const InputDecoration(
-                          labelText: 'Health history (optional)',
-                          hintText: 'e.g. seizures, hearing concerns',
-                          prefixIcon: Icon(Icons.health_and_safety_outlined),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-
                       DropdownButtonFormField<String>(
-                        initialValue: _district,
+                        initialValue: _district != null &&
+                                _districts.contains(_district)
+                            ? _district
+                            : null,
                         items: _districts
                             .map(
                               (d) => DropdownMenuItem<String>(
@@ -535,12 +785,7 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                               ),
                             )
                             .toList(),
-                        onChanged: (value) {
-                          setState(() {
-                            _district = value;
-                            _mandal = null;
-                          });
-                        },
+                        onChanged: null,
                         decoration: InputDecoration(
                           labelText: AppLocalizations.of(context).t('district'),
                           prefixIcon: const Icon(Icons.location_city),
@@ -552,7 +797,10 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                       const SizedBox(height: 12),
 
                       DropdownButtonFormField<String>(
-                        initialValue: _mandal,
+                        initialValue: _mandal != null &&
+                                _mandalsForDistrict.contains(_mandal)
+                            ? _mandal
+                            : null,
                         items: _mandalsForDistrict
                             .map(
                               (m) => DropdownMenuItem<String>(
@@ -561,11 +809,7 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                               ),
                             )
                             .toList(),
-                        onChanged: _district == null
-                            ? null
-                            : (value) {
-                                setState(() => _mandal = value);
-                              },
+                        onChanged: null,
                         decoration: InputDecoration(
                           labelText: AppLocalizations.of(context).t('mandal'),
                           prefixIcon: const Icon(Icons.map_outlined),

@@ -8,7 +8,7 @@ This document describes the complete Problem B Referral System that has been imp
 
 - **Backend**: FastAPI on Python (Port 8000) at 127.0.0.1:8000
 - **Frontend**: Flutter Web on Chrome
-- **Database**: SQLite (ecd_data.db) with two core tables:
+- **Database**: PostgreSQL (`ecd_data`) with two core tables:
   - `referral_action` - Main referral records
   - `referral_status_history` - Audit trail of status changes
 
@@ -190,19 +190,12 @@ class ReferralData {
 
 #### 1. Create Test Referral
 ```bash
-# Database insert via Python
-python -c "
-import sqlite3
-from datetime import datetime, timedelta
-
-conn = sqlite3.connect('app/ecd_data.db')
-cursor = conn.cursor()
-cursor.execute('''
+# Database insert via PostgreSQL (psql)
+psql "$env:ECD_DATABASE_URL" -c "
 INSERT INTO referral_action (
     referral_id, child_id, aww_id, referral_required, referral_type, urgency,
     referral_status, referral_date, followup_deadline, escalation_level, last_updated
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-''', (
+) VALUES (
     'ref_test001',
     'test_child_123',
     'aww_001',
@@ -210,14 +203,12 @@ INSERT INTO referral_action (
     'PHC',
     'Priority',
     'Pending',
-    datetime.utcnow().date().isoformat(),
-    (datetime.utcnow().date() + timedelta(days=10)).isoformat(),
+    CURRENT_DATE::text,
+    (CURRENT_DATE + INTERVAL '10 day')::date::text,
     0,
-    datetime.utcnow().date().isoformat()
-))
-conn.commit()
-conn.close()
-print('Test referral created')
+    CURRENT_DATE::text
+)
+ON CONFLICT (referral_id) DO NOTHING;
 "
 ```
 
@@ -383,4 +374,4 @@ Buttons are contextually enabled based on current status:
 For issues or questions about the Problem B Referral System implementation, refer to:
 - Backend logs: `backend/app/main.py`
 - Flutter debug output: Chrome DevTools console
-- Database: `backend/app/ecd_data.db`
+- Database: PostgreSQL `ecd_data` (`ECD_DATABASE_URL`)

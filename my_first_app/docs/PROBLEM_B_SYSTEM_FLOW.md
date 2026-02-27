@@ -549,7 +549,6 @@ def evaluate_week_progress(plan_id, week_data):
 Backend:
 ├─ backend/app/problem_b_service.py (MAIN LOGIC)
 ├─ backend/app/model_service.py (Activity generation)
-├─ backend/app/problem_b_schema.sql (DB schema - ready)
 └─ backend/app/main.py (API endpoints to add)
 
 Frontend:

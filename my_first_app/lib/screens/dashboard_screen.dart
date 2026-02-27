@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:my_first_app/core/localization/app_localizations.dart';
 import 'package:my_first_app/core/navigation/app_route_observer.dart';
@@ -15,6 +17,7 @@ import 'package:my_first_app/screens/behavioral_psychosocial_screen.dart';
 import 'package:my_first_app/screens/awc_intervention_monitor_screen.dart';
 import 'package:my_first_app/screens/settings_screen.dart';
 import 'package:my_first_app/screens/behavioral_psychosocial_summary_screen.dart';
+import 'package:my_first_app/services/api_service.dart';
 import 'package:my_first_app/services/auth_service.dart';
 import 'package:my_first_app/services/local_db_service.dart';
 import 'package:my_first_app/widgets/language_menu_button.dart';
@@ -28,11 +31,16 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> with RouteAware {
+  static final RegExp _awcCodePattern = RegExp(r'^(AWW|AWS)_DEMO_(\d{3,4})$');
   final LocalDBService _localDb = LocalDBService();
+  final APIService _api = APIService();
   final AuthService _authService = AuthService();
 
   int totalChildren = 0;
   int pendingSync = 0;
+  String _loggedInAwcCode = '';
+  Timer? _statsRefreshTimer;
+  bool _statsLoadInProgress = false;
 
   double _uiScale(BuildContext context) {
     final width = MediaQuery.of(context).size.width;
@@ -95,6 +103,7 @@ class _DashboardScreenState extends State<DashboardScreen> with RouteAware {
   void initState() {
     super.initState();
     _loadStats();
+    _startStatsAutoRefresh();
   }
 
   @override
@@ -108,6 +117,7 @@ class _DashboardScreenState extends State<DashboardScreen> with RouteAware {
 
   @override
   void dispose() {
+    _statsRefreshTimer?.cancel();
     routeObserver.unsubscribe(this);
     super.dispose();
   }
@@ -117,17 +127,71 @@ class _DashboardScreenState extends State<DashboardScreen> with RouteAware {
     _loadStats();
   }
 
-  Future<void> _loadStats() async {
-    await _localDb.initialize();
-    final children = _localDb.getAllChildren();
-    final screenings = _localDb.getUnsyncedScreenings();
-    final referrals = _localDb.getUnsyncedReferrals();
-
-    if (!mounted) return;
-    setState(() {
-      totalChildren = children.length;
-      pendingSync = screenings.length + referrals.length;
+  void _startStatsAutoRefresh() {
+    _statsRefreshTimer?.cancel();
+    _statsRefreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      _loadStats();
     });
+  }
+
+  bool _awcCodesMatch(String left, String right) {
+    final a = left.trim().toUpperCase();
+    final b = right.trim().toUpperCase();
+    if (a.isEmpty || b.isEmpty) {
+      return a == b;
+    }
+    if (a == b) {
+      return true;
+    }
+    final ma = _awcCodePattern.firstMatch(a);
+    final mb = _awcCodePattern.firstMatch(b);
+    if (ma == null || mb == null) {
+      return false;
+    }
+    return ma.group(2) == mb.group(2);
+  }
+
+  Future<void> _loadStats() async {
+    if (_statsLoadInProgress) return;
+    _statsLoadInProgress = true;
+    try {
+      await _localDb.initialize();
+      final savedAwcCode =
+          (await _authService.getLoggedInAwcCode() ?? '').trim().toUpperCase();
+      final screenings = _localDb.getUnsyncedScreenings();
+      final referrals = _localDb.getUnsyncedReferrals();
+      int registeredCount;
+      try {
+        registeredCount = await _api.getRegisteredChildrenCount(
+          limit: 1000,
+          awcCode: savedAwcCode.isEmpty ? null : savedAwcCode,
+        );
+      } catch (_) {
+        final children = _localDb
+            .getAllChildren()
+            .where(
+              (c) =>
+                  savedAwcCode.isEmpty ||
+                  _awcCodesMatch(c.awcCode, savedAwcCode),
+            )
+            .toList();
+        registeredCount = children.length;
+      }
+
+      if (!mounted) return;
+      final nextPending = screenings.length + referrals.length;
+      if (registeredCount != totalChildren ||
+          nextPending != pendingSync ||
+          savedAwcCode != _loggedInAwcCode) {
+        setState(() {
+          totalChildren = registeredCount;
+          pendingSync = nextPending;
+          _loggedInAwcCode = savedAwcCode;
+        });
+      }
+    } finally {
+      _statsLoadInProgress = false;
+    }
   }
 
   Future<void> _logout() async {
@@ -276,7 +340,28 @@ class _DashboardScreenState extends State<DashboardScreen> with RouteAware {
 
   Future<void> _viewRegisteredChildren() async {
     await _localDb.initialize();
-    final children = _localDb.getAllChildren();
+    final savedAwcCode = _loggedInAwcCode.isNotEmpty
+        ? _loggedInAwcCode
+        : (await _authService.getLoggedInAwcCode() ?? '').trim().toUpperCase();
+    List<Map<String, dynamic>> backendChildren = const <Map<String, dynamic>>[];
+    var loadedFromBackend = false;
+    try {
+      backendChildren = await _api.getRegisteredChildren(
+        limit: 1000,
+        awcCode: savedAwcCode.isEmpty ? null : savedAwcCode,
+      );
+      loadedFromBackend = true;
+    } catch (_) {
+      loadedFromBackend = false;
+    }
+    final children = _localDb
+        .getAllChildren()
+        .where(
+          (c) =>
+              savedAwcCode.isEmpty ||
+              _awcCodesMatch(c.awcCode, savedAwcCode),
+        )
+        .toList();
     if (!mounted) return;
     showDialog(
       context: context,
@@ -284,12 +369,44 @@ class _DashboardScreenState extends State<DashboardScreen> with RouteAware {
         title: Text(AppLocalizations.of(context).t('registered_children')),
         content: SizedBox(
           width: double.maxFinite,
-          child: children.isEmpty
+          child: (loadedFromBackend ? backendChildren.isEmpty : children.isEmpty)
               ? Text(AppLocalizations.of(context).t('no_children_registered'))
               : ListView.builder(
                   shrinkWrap: true,
-                  itemCount: children.length,
+                  itemCount: loadedFromBackend
+                      ? backendChildren.length
+                      : children.length,
                   itemBuilder: (context, index) {
+                    if (loadedFromBackend) {
+                      final row = backendChildren[index];
+                      final childId = (row['child_id'] ?? '').toString().trim();
+                      final childName =
+                          (row['child_name'] ?? '').toString().trim();
+                      final ageRaw = row['age_months'];
+                      final ageMonths = ageRaw is num
+                          ? ageRaw.toInt()
+                          : int.tryParse('${ageRaw ?? ''}') ?? 0;
+                      final genderRaw =
+                          (row['gender'] ?? '').toString().trim().toUpperCase();
+                      final genderLabel = genderRaw.startsWith('M')
+                          ? AppLocalizations.of(context).t('gender_male')
+                          : genderRaw.startsWith('F')
+                              ? AppLocalizations.of(context).t('gender_female')
+                              : (row['gender']?.toString().trim().isNotEmpty ??
+                                        false)
+                                  ? row['gender'].toString().trim()
+                                  : '-';
+                      return ListTile(
+                        title: Text(
+                          childId.isNotEmpty
+                              ? childId
+                              : (childName.isNotEmpty ? childName : 'Unknown'),
+                        ),
+                        subtitle: Text(
+                          '${AppLocalizations.of(context).t('age_with_months', {'age': '$ageMonths'})} | $genderLabel',
+                        ),
+                      );
+                    }
                     final c = children[index];
                     final genderLabel = c.gender == 'M' ? AppLocalizations.of(context).t('gender_male') : AppLocalizations.of(context).t('gender_female');
                     return ListTile(
@@ -649,6 +766,9 @@ class _DashboardScreenState extends State<DashboardScreen> with RouteAware {
         ? l10n.t('all_synced')
         : l10n.t('pending_count', {'count': '$pendingSync'});
     final pendingColor = pendingSync == 0 ? const Color(0xFF2E7D32) : const Color(0xFFE65100);
+    final awcHeaderLabel = _loggedInAwcCode.isEmpty
+        ? AppLocalizations.of(context).t('aww_short')
+        : _loggedInAwcCode;
 
     return Scaffold(
       drawer: _buildNavDrawer(),
@@ -718,7 +838,20 @@ class _DashboardScreenState extends State<DashboardScreen> with RouteAware {
                             child: Icon(Icons.person, color: Color(0xFF1565C0)),
                           ),
                           SizedBox(height: 4 * s),
-                          Text(AppLocalizations.of(context).t('aww_short'), style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12 * s)),
+                          SizedBox(
+                            width: 130 * s,
+                            child: Text(
+                              awcHeaderLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 12 * s,
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                     ],

@@ -8,8 +8,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:my_first_app/widgets/language_menu_button.dart';
 
 class SignUpScreen extends StatefulWidget {
-  final String? initialName;
-  const SignUpScreen({super.key, this.initialName});
+  const SignUpScreen({super.key});
 
   @override
   State<SignUpScreen> createState() => _SignUpScreenState();
@@ -17,26 +16,70 @@ class SignUpScreen extends StatefulWidget {
 
 class _SignUpScreenState extends State<SignUpScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _nameController = TextEditingController();
-  final _mobileController = TextEditingController();
+  static final RegExp _awcCodePattern = RegExp(r'^(AWW|AWS)_DEMO_\d{3}$');
   final _passwordController = TextEditingController();
   final _confirmController = TextEditingController();
-  final _awcController = TextEditingController(text: 'AWS_DEMO_001');
+  final _awcController = TextEditingController(text: 'AWW_DEMO_001');
 
   final AuthService _auth = AuthService();
   final APIService _apiService = APIService();
   final GoogleSignIn _googleSignIn = GoogleSignIn();
   bool _loading = false;
   bool _obscure = true;
+  String? _district;
+  String? _mandal;
+  static const Set<String> _excludedDistrictsForRegistration = {
+    'Kanigiri (Merged/Restructured)',
+    'Madanapalle (New)',
+  };
+
+  Map<String, List<String>> get _registrationDistrictMandals {
+    final filtered = <String, List<String>>{};
+    for (final entry in AppConstants.apDistrictMandals.entries) {
+      if (_excludedDistrictsForRegistration.contains(entry.key)) {
+        continue;
+      }
+      filtered[entry.key] = List<String>.from(entry.value);
+    }
+    return filtered;
+  }
+
+  List<String> get _districts {
+    final items = _registrationDistrictMandals.keys.toList();
+    items.sort();
+    return items;
+  }
+
+  List<String> get _mandalsForDistrict {
+    if (_district == null) return const [];
+    return _registrationDistrictMandals[_district] ?? const [];
+  }
 
   @override
   void dispose() {
-    _nameController.dispose();
-    _mobileController.dispose();
     _passwordController.dispose();
     _confirmController.dispose();
     _awcController.dispose();
     super.dispose();
+  }
+
+  Future<void> _showAlreadyRegisteredDialog() async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Already registered'),
+        content: const Text(
+          'This AWW code is already registered for the selected district and mandal.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _registerWithGoogle() async {
@@ -50,27 +93,61 @@ class _SignUpScreenState extends State<SignUpScreen> {
       }
 
       // Create a registration record from Google account
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final awwId = 'aww_$timestamp';
       final aww = AWWModel(
-        awwId: 'aww_${account.email.replaceAll('@', '_')}',
-        name: account.displayName ?? account.email,
-        mobileNumber: '9999999999', // Demo placeholder for Google sign-up
-        awcCode: 'AWS_DEMO_001',
-        mandal: '',
-        district: '',
+        awwId: awwId,
+        name: awwId,
+        mobileNumber: '', // No phone number field
+        awcCode: 'AWW_DEMO_001',
+        mandal: _mandal ?? '',
+        district: _district ?? '',
         password: 'google_oauth_token',
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
       );
+
+      final payload = {
+        'aww_id': aww.awwId,
+        'name': aww.name,
+        'mobile_number': aww.mobileNumber,
+        'password': aww.password,
+        'awc_code': aww.awcCode,
+        'mandal': aww.mandal,
+        'district': aww.district,
+        'created_at': aww.createdAt.toIso8601String(),
+        'updated_at': aww.updatedAt.toIso8601String(),
+      };
+      try {
+        await _apiService.registerAWW(payload);
+      } catch (apiError) {
+        setState(() => _loading = false);
+        if (!mounted) return;
+        final message = apiError.toString().toLowerCase();
+        if (message.contains('http 409') ||
+            message.contains('already registered')) {
+          await _showAlreadyRegisteredDialog();
+          return;
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Registration failed: $apiError')),
+        );
+        return;
+      }
 
       final ok = await _auth.register(aww);
       setState(() => _loading = false);
       if (!mounted) return;
       
       if (ok) {
-        final name = account.displayName ?? account.email;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.t('registration_success'))));
         // Return to Login screen and indicate this registration used Google
-        Navigator.of(context).pop({'mobile': account.email, 'name': name, 'google': 'true'});
+        Navigator.of(context).pop({
+          'mobile': awwId,
+          'name': awwId,
+          'google': 'true',
+          'awc_code': 'AWW_DEMO_001',
+        });
       } else {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.t('error_invalid_login'))));
       }
@@ -98,60 +175,74 @@ class _SignUpScreenState extends State<SignUpScreen> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
 
-    final name = _nameController.text.trim();
-    final mobile = _mobileController.text.trim();
     final password = _passwordController.text;
-    final awc = _awcController.text.trim();
+    final awc = _awcController.text.trim().toUpperCase();
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final awwId = 'aww_$timestamp'; // Generate unique ID using timestamp
 
     final aww = AWWModel(
-      awwId: 'aww_$mobile',
-      name: name,
-      mobileNumber: mobile,
-      awcCode: awc.isEmpty ? 'AWS_DEMO_001' : awc,
-      mandal: '',
-      district: '',
+      awwId: awwId,
+      name: awwId, // Use awwId as name since name field is removed
+      mobileNumber: '', // Empty since mobile field is removed
+      awcCode: awc.isEmpty ? 'AWW_DEMO_001' : awc,
+      mandal: _mandal ?? '',
+      district: _district ?? '',
       password: password,
       createdAt: DateTime.now(),
       updatedAt: DateTime.now(),
     );
 
     try {
-      // First, save locally
-      final ok = await _auth.register(aww);
-      
-      if (!ok) {
+      // First, register in backend (source of truth) and prevent duplicates.
+      final payload = {
+        'aww_id': aww.awwId,
+        'name': aww.name,
+        'mobile_number': aww.mobileNumber,
+        'password': aww.password,
+        'awc_code': aww.awcCode,
+        'mandal': aww.mandal,
+        'district': aww.district,
+        'created_at': aww.createdAt.toIso8601String(),
+        'updated_at': aww.updatedAt.toIso8601String(),
+      };
+      try {
+        await _apiService.registerAWW(payload);
+      } catch (apiError) {
         setState(() => _loading = false);
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.t('error_invalid_login'))));
+        final message = apiError.toString().toLowerCase();
+        if (message.contains('http 409') ||
+            message.contains('already registered')) {
+          await _showAlreadyRegisteredDialog();
+          return;
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Registration failed: $apiError')),
+        );
         return;
       }
 
-      // Then, sync to backend PostgreSQL database via API
-      try {
-        final payload = {
-          'aww_id': aww.awwId,
-          'name': aww.name,
-          'mobile_number': aww.mobileNumber,
-          'password': aww.password,
-          'awc_code': aww.awcCode,
-          'mandal': aww.mandal,
-          'district': aww.district,
-          'created_at': aww.createdAt.toIso8601String(),
-          'updated_at': aww.updatedAt.toIso8601String(),
-        };
-        
-        await _apiService.registerAWW(payload);
-        print('✅ AWW registered successfully in PostgreSQL database');
-      } catch (apiError) {
-        print('⚠️ Local registration done, but API sync failed: $apiError');
-        // Don't fail the registration if local save succeeded
+      // Then, save locally.
+      final ok = await _auth.register(aww);
+      if (!ok) {
+        setState(() => _loading = false);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.t('error_invalid_login'))),
+        );
+        return;
       }
 
       setState(() => _loading = false);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.t('registration_success'))));
       // Return to Login screen and indicate a normal registration completed
-      Navigator.of(context).pop({'mobile': mobile, 'name': name, 'registered': 'true'});
+      Navigator.of(context).pop({
+        'mobile': awwId,
+        'name': awwId,
+        'registered': 'true',
+        'awc_code': aww.awcCode,
+      });
     } catch (e) {
       setState(() => _loading = false);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${l10n.t('error_invalid_login')}: $e')));
@@ -249,27 +340,68 @@ class _SignUpScreenState extends State<SignUpScreen> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 TextFormField(
-                                  controller: _nameController,
-                                  decoration: InputDecoration(prefixIcon: const Icon(Icons.person), hintText: l10n.t('full_name')),
-                                  validator: (v) => (v == null || v.trim().isEmpty) ? '${l10n.t('full_name')} ${l10n.t('is_required')}' : null,
-                                ),
-                                const SizedBox(height: 12),
-                                TextFormField(
-                                  controller: _mobileController,
-                                  keyboardType: TextInputType.phone,
-                                  maxLength: 10,
-                                  decoration: InputDecoration(prefixIcon: const Icon(Icons.phone), hintText: l10n.t('mobile_number')),
-                                  validator: (v) {
-                                    final value = (v ?? '').trim();
-                                    if (value.length != 10) return l10n.t('error_mobile_10');
-                                    if (int.tryParse(value) == null) return l10n.t('error_numbers_only');
+                                  controller: _awcController,
+                                  textCapitalization: TextCapitalization.characters,
+                                  decoration: InputDecoration(prefixIcon: const Icon(Icons.home_outlined), hintText: l10n.t('awc_code')),
+                                  validator: (value) {
+                                    final awc = (value ?? '').trim().toUpperCase();
+                                    if (awc.isEmpty) {
+                                      return l10n.t('awc_code');
+                                    }
+                                    if (!_awcCodePattern.hasMatch(awc)) {
+                                      return 'Use format AWW_DEMO_001';
+                                    }
                                     return null;
                                   },
                                 ),
                                 const SizedBox(height: 12),
-                                TextFormField(
-                                  controller: _awcController,
-                                  decoration: InputDecoration(prefixIcon: const Icon(Icons.home_outlined), hintText: l10n.t('awc_code')),
+                                DropdownButtonFormField<String>(
+                                  initialValue: _district,
+                                  items: _districts
+                                      .map(
+                                        (d) => DropdownMenuItem<String>(
+                                          value: d,
+                                          child: Text(d),
+                                        ),
+                                      )
+                                      .toList(),
+                                  onChanged: (value) {
+                                    setState(() {
+                                      _district = value;
+                                      _mandal = null;
+                                    });
+                                  },
+                                  decoration: InputDecoration(
+                                    prefixIcon: const Icon(Icons.location_city),
+                                    hintText: l10n.t('select_district'),
+                                  ),
+                                  validator: (v) => (v == null || v.trim().isEmpty)
+                                      ? l10n.t('select_district')
+                                      : null,
+                                ),
+                                const SizedBox(height: 12),
+                                DropdownButtonFormField<String>(
+                                  initialValue: _mandal,
+                                  items: _mandalsForDistrict
+                                      .map(
+                                        (m) => DropdownMenuItem<String>(
+                                          value: m,
+                                          child: Text(m),
+                                        ),
+                                      )
+                                      .toList(),
+                                  onChanged: _district == null
+                                      ? null
+                                      : (value) {
+                                          setState(() => _mandal = value);
+                                        },
+                                  decoration: InputDecoration(
+                                    prefixIcon: const Icon(Icons.map_outlined),
+                                    hintText: l10n.t('select_mandal'),
+                                  ),
+                                  validator: (v) => (v == null || v.trim().isEmpty)
+                                      ? l10n.t('select_mandal')
+                                      : null,
                                 ),
                                 const SizedBox(height: 12),
                                 TextFormField(

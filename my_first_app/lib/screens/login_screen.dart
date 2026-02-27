@@ -16,11 +16,12 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _mobileController = TextEditingController();
+  final _awcCodeController = TextEditingController();
   final _passwordController = TextEditingController();
   final AuthService _authService = AuthService();
   final APIService _apiService = APIService();
   final GoogleSignIn _googleSignIn = GoogleSignIn();
+  static final RegExp _awcCodePattern = RegExp(r'^(AWW|AWS)_DEMO_\d{3,4}$');
 
   bool _googleRegistered = false;
   bool _passwordDisabled = false;
@@ -31,26 +32,45 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
-    _mobileController.dispose();
+    _awcCodeController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
+
+  String _normalizedAwcCode() => _awcCodeController.text.trim().toUpperCase();
 
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
     bool success = false;
+    final awcCode = _normalizedAwcCode();
     try {
       final token = await _apiService.login(
-        _mobileController.text.trim(),
+        awcCode,
         _passwordController.text,
       );
       await _authService.saveToken(token);
+      await _authService.saveLoggedInAwcCode(awcCode);
+      try {
+        final profile = await _apiService.getAwwProfile(awcCode);
+        if (profile != null) {
+          await _authService.saveLoggedInAwwProfile(
+            awcCode: (profile['awc_code'] ?? awcCode).toString(),
+            awwId: profile['aww_id']?.toString(),
+            name: profile['name']?.toString(),
+            mobileNumber: profile['mobile_number']?.toString(),
+            district: profile['district']?.toString(),
+            mandal: profile['mandal']?.toString(),
+          );
+        }
+      } catch (_) {
+        // Keep login successful even if profile fetch fails.
+      }
       success = true;
     } catch (_) {
       // Fallback for offline/demo mode so field testing can continue.
       success = await _authService.login(
-        _mobileController.text.trim(),
+        awcCode,
         _passwordController.text,
       );
     }
@@ -81,9 +101,6 @@ class _LoginScreenState extends State<LoginScreen> {
       // Generate a token from Google account (or mock for demo)
       final token = 'google_${account.id}_${DateTime.now().millisecondsSinceEpoch}';
       await _authService.saveToken(token);
-      
-      // Pre-fill with Google account name for reference
-      _mobileController.text = account.email;
       
       if (!mounted) return;
       setState(() => _loading = false);
@@ -118,6 +135,25 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _loading = true);
     try {
       final authed = await _authService.isAuthenticated();
+      final awcCode = _normalizedAwcCode();
+      if (_awcCodePattern.hasMatch(awcCode)) {
+        await _authService.saveLoggedInAwcCode(awcCode);
+        try {
+          final profile = await _apiService.getAwwProfile(awcCode);
+          if (profile != null) {
+            await _authService.saveLoggedInAwwProfile(
+              awcCode: (profile['awc_code'] ?? awcCode).toString(),
+              awwId: profile['aww_id']?.toString(),
+              name: profile['name']?.toString(),
+              mobileNumber: profile['mobile_number']?.toString(),
+              district: profile['district']?.toString(),
+              mandal: profile['mandal']?.toString(),
+            );
+          }
+        } catch (_) {
+          // Keep registered-login flow working if profile fetch fails.
+        }
+      }
       if (!mounted) return;
       setState(() => _loading = false);
       if (authed) {
@@ -233,21 +269,22 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ),
                                 const SizedBox(height: 14),
 
-                                // Username / Mobile field
+                                // Anganwadi code field
                                 TextFormField(
-                                  controller: _mobileController,
+                                  controller: _awcCodeController,
                                   keyboardType: TextInputType.text,
                                   decoration: InputDecoration(
-                                    prefixIcon: const Icon(Icons.person),
-                                    hintText: l10n.t('username_or_mobile'),
+                                    prefixIcon: const Icon(Icons.home_outlined),
+                                    labelText: l10n.t('awc_code'),
+                                    hintText: 'AWW_DEMO_XXXX',
                                   ),
                                   validator: (v) {
                                     final value = (v ?? '').trim();
-                                    if (value.isEmpty) return l10n.t('error_username_or_mobile_required');
-                                    // accept either 10-digit mobile OR any non-empty username
-                                    if (value.length == 10 && int.tryParse(value) != null) return null;
-                                    if (value.length >= 2) return null;
-                                    return l10n.t('error_username_or_mobile_required');
+                                    if (value.isEmpty) return 'AWC code is required';
+                                    if (!_awcCodePattern.hasMatch(value.toUpperCase())) {
+                                      return 'Use format AWW_DEMO_XXXX';
+                                    }
+                                    return null;
                                   },
                                 ),
                                 const SizedBox(height: 12),
@@ -323,12 +360,15 @@ class _LoginScreenState extends State<LoginScreen> {
                                         onPressed: () async {
                                           final result = await Navigator.of(context).push<Map<String, String>>(MaterialPageRoute(builder: (_) => const SignUpScreen()));
                                           if (result != null && mounted) {
+                                            final awcCode = (result['awc_code'] ?? '').trim().toUpperCase();
                                             final mobile = result['mobile'] ?? '';
                                             final name = result['name'] ?? '';
                                               final googleFlag = result['google'] ?? '';
                                               final registeredFlag = result['registered'] ?? '';
-                                            if (mobile.isNotEmpty) {
-                                              _mobileController.text = mobile;
+                                            if (awcCode.isNotEmpty) {
+                                              _awcCodeController.text = awcCode;
+                                            } else if (_awcCodePattern.hasMatch(mobile.toUpperCase())) {
+                                              _awcCodeController.text = mobile.toUpperCase();
                                             }
                                               if (googleFlag == 'true') {
                                                 // Hide password field and switch Login button to perform Google sign-in

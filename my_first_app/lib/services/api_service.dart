@@ -78,11 +78,14 @@ class APIService {
   /// Login and return JWT token from backend.
   /// Supported response shapes:
   /// { "token": "..." } OR { "access_token": "..." } OR { "data": { "token": "..." } }
-  Future<String> login(String mobile, String password) async {
+  Future<String> login(String awcCode, String password) async {
     try {
       final response = await _dio.post(
         AppConstants.loginEndpoint,
-        data: {'mobile_number': mobile, 'password': password},
+        data: {
+          'awc_code': awcCode.trim().toUpperCase(),
+          'password': password,
+        },
       );
       final body = response.data;
       if (body is Map<String, dynamic>) {
@@ -101,6 +104,37 @@ class APIService {
       throw Exception('Token not present in login response');
     } on DioException catch (e) {
       throw Exception('Login failed: ${e.message}');
+    }
+  }
+
+  /// Fetch AWW profile (district/mandal/name) for the logged-in AWC code.
+  Future<Map<String, dynamic>?> getAwwProfile(String awcCode) async {
+    final normalizedAwcCode = awcCode.trim().toUpperCase();
+    if (normalizedAwcCode.isEmpty) {
+      return null;
+    }
+    try {
+      final response = await _dio.get(
+        '/auth/profile',
+        queryParameters: {'awc_code': normalizedAwcCode},
+      );
+      final data = response.data;
+      if (data is! Map<String, dynamic>) {
+        return null;
+      }
+      final profile = data['profile'];
+      if (profile is Map<String, dynamic>) {
+        return profile;
+      }
+      if (profile is Map) {
+        return Map<String, dynamic>.from(profile);
+      }
+      return null;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) {
+        return null;
+      }
+      throw Exception('AWW profile fetch failed: ${_formatDioError(e)}');
     }
   }
 
@@ -134,7 +168,7 @@ class APIService {
     }
   }
 
-  /// Register/upsert child profile in backend source DB.
+  /// Register child profile in backend source DB.
   Future<Map<String, dynamic>> registerChild(
     ChildModel child, {
     String assessmentCycle = 'Baseline',
@@ -142,24 +176,12 @@ class APIService {
     final dobIso = child.dateOfBirth.toIso8601String().split('T')[0];
     final fastApiPayload = {
       'child_id': child.childId,
-      'child_name': child.childName,
-      'gender': child.gender,
-      'age_months': child.ageMonths,
       'date_of_birth': dobIso,
       'dob': dobIso,
-      'awc_id': child.awcCode,
       'awc_code': child.awcCode,
-      'sector_id': '',
-      'mandal_id': child.mandal,
       'mandal': child.mandal,
-      'district_id': child.district,
       'district': child.district,
       'assessment_cycle': assessmentCycle,
-      'village': child.address ?? '',
-      'parent_name': child.parentName,
-      'parent_mobile': child.parentMobile,
-      'created_at': child.createdAt.toIso8601String(),
-      'updated_at': child.updatedAt.toIso8601String(),
     };
 
     try {
@@ -182,6 +204,72 @@ class APIService {
       return response.data as Map<String, dynamic>;
     } on DioException catch (e) {
       throw Exception('Failed to fetch child details: ${e.message}');
+    }
+  }
+
+  /// Fetch registered children count from backend child_profile.
+  Future<int> getRegisteredChildrenCount({
+    int limit = 1000,
+    String? awcCode,
+  }) async {
+    final normalizedAwcCode = awcCode?.trim().toUpperCase();
+    final queryParameters = <String, dynamic>{
+      'limit': limit,
+      if (normalizedAwcCode != null && normalizedAwcCode.isNotEmpty)
+        'awc_code': normalizedAwcCode,
+    };
+    try {
+      final response = await _dio.get(
+        AppConstants.childListEndpoint,
+        queryParameters: queryParameters,
+      );
+      final data = response.data;
+      if (data is Map<String, dynamic>) {
+        final count = data['count'];
+        if (count is num) {
+          return count.toInt();
+        }
+        final items = data['items'];
+        if (items is List) {
+          return items.length;
+        }
+      }
+      throw Exception('Unexpected children list response format');
+    } on DioException catch (e) {
+      throw Exception('Failed to fetch child count: ${_formatDioError(e)}');
+    }
+  }
+
+  /// Fetch registered children list from backend child_profile.
+  Future<List<Map<String, dynamic>>> getRegisteredChildren({
+    int limit = 1000,
+    String? awcCode,
+  }) async {
+    final normalizedAwcCode = awcCode?.trim().toUpperCase();
+    final queryParameters = <String, dynamic>{
+      'limit': limit,
+      if (normalizedAwcCode != null && normalizedAwcCode.isNotEmpty)
+        'awc_code': normalizedAwcCode,
+    };
+    try {
+      final response = await _dio.get(
+        AppConstants.childListEndpoint,
+        queryParameters: queryParameters,
+      );
+      final data = response.data;
+      if (data is! Map<String, dynamic>) {
+        throw Exception('Unexpected children list response format');
+      }
+      final items = data['items'];
+      if (items is! List) {
+        return const <Map<String, dynamic>>[];
+      }
+      return items
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList();
+    } on DioException catch (e) {
+      throw Exception('Failed to fetch children list: ${_formatDioError(e)}');
     }
   }
 
@@ -258,15 +346,6 @@ class APIService {
       return response.data as Map<String, dynamic>;
     } on DioException catch (e) {
       throw Exception('Problem B rules fetch failed: ${e.message}');
-    }
-  }
-
-  Future<Map<String, dynamic>> getProblemBSchema() async {
-    try {
-      final response = await _dio.get('/problem-b/schema');
-      return response.data as Map<String, dynamic>;
-    } on DioException catch (e) {
-      throw Exception('Problem B schema fetch failed: ${e.message}');
     }
   }
 

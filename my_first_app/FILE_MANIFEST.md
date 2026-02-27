@@ -150,10 +150,10 @@ flutter build web --release
 
 ### 3. Database
 ```bash
-db_path: backend/app/ecd_data.db (SQLite)
-# Automatically created on first run
-# Tables auto-created if missing
-# Test data: ref_test001 (for child_id test_child_123)
+db_url: postgresql://postgres:postgres@127.0.0.1:5432/ecd_data
+# Prefer env vars: ECD_DATABASE_URL (or DATABASE_URL)
+# Tables are created/updated by backend startup logic and migrations
+# Test data example: ref_test001 (for child_id test_child_123)
 ```
 
 ---
@@ -270,7 +270,7 @@ All components tested and verified:
 **For Bug Reports**:
 - Check device browser console (Chrome DevTools)
 - Check backend logs: `backend/app/main.py` output
-- Query database: `backend/app/ecd_data.db`
+- Query database: PostgreSQL `ecd_data` via `psql`/pgAdmin
 
 **For Questions**:
 - Refer to testing guide for API usage
@@ -285,7 +285,7 @@ All components tested and verified:
 - **Python**: 3.12.10
 - **FastAPI**: 0.115.0
 - **Dio HTTP Client**: 5.3.0
-- **Database**: SQLite3
+- **Database**: PostgreSQL
 
 ---
 
