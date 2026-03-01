@@ -9,8 +9,27 @@ class SyncService {
   final Connectivity _connectivity = Connectivity();
   final APIService _apiService = APIService();
   final LocalDBService _localDBService;
+  static final RegExp _awcDemoPattern = RegExp(r'^(AWW|AWS)_DEMO_(\d{3,4})$');
+  static final RegExp _awcDemoReversedPattern = RegExp(
+    r'^DEMO_(AWW|AWS)_(\d{3,4})$',
+  );
 
   SyncService(this._localDBService);
+
+  String _normalizeAwcCode(String value) {
+    final raw = value.trim().toUpperCase();
+    final direct = _awcDemoPattern.firstMatch(raw);
+    if (direct != null) {
+      return 'AWW_DEMO_${direct.group(2)}';
+    }
+    final reversed = _awcDemoReversedPattern.firstMatch(raw);
+    if (reversed != null) {
+      return 'AWW_DEMO_${reversed.group(2)}';
+    }
+    return raw;
+  }
+
+  bool _isCanonicalAwc(String value) => _awcDemoPattern.hasMatch(value);
 
   bool _hasAnyConnectivity(dynamic value) {
     if (value is ConnectivityResult) {
@@ -49,8 +68,15 @@ class SyncService {
           final child = _localDBService.getChild(screening.childId);
           final payload = screening.toJson();
           payload['assessment_cycle'] = 'Baseline';
+          final screeningAwc = _normalizeAwcCode(screening.awwId);
+          final childAwc = _normalizeAwcCode(child?.awcCode ?? '');
+          final awcForSync = _isCanonicalAwc(screeningAwc)
+              ? screeningAwc
+              : (_isCanonicalAwc(childAwc) ? childAwc : screeningAwc);
+          payload['awc_code'] = awcForSync;
+          payload['awc_id'] = awcForSync;
+          payload['aww_id'] = awcForSync;
           if (child != null) {
-            payload['awc_id'] = child.awcCode;
             payload['sector_id'] = '';
             payload['mandal'] = child.mandal;
             payload['district'] = child.district;

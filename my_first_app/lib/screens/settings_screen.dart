@@ -2,6 +2,7 @@
 import 'package:provider/provider.dart';
 import 'package:my_first_app/core/localization/app_localizations.dart';
 import 'package:my_first_app/core/localization/locale_provider.dart';
+import 'package:my_first_app/core/navigation/navigation_state_service.dart';
 import 'package:my_first_app/widgets/language_menu_button.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -17,6 +18,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool maskPii = true;
   bool largeText = false;
   int autoLogoutMinutes = 15;
+
+  @override
+  void initState() {
+    super.initState();
+    NavigationStateService.instance.saveState(
+      screen: NavigationStateService.screenSettings,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {

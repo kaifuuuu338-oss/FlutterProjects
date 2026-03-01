@@ -4,12 +4,12 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:my_first_app/core/constants/neuro_behavioral_question_bank.dart';
 import 'package:my_first_app/core/localization/app_localizations.dart';
+import 'package:my_first_app/core/navigation/navigation_state_service.dart';
 import 'package:my_first_app/models/child_model.dart';
 import 'package:my_first_app/models/screening_model.dart';
-import 'package:my_first_app/screens/problem_a_environment_screen.dart';
+import 'package:my_first_app/screens/nutrition_screen.dart';
 import 'package:my_first_app/services/api_service.dart';
 import 'package:my_first_app/services/local_db_service.dart';
-import 'package:my_first_app/widgets/question_card.dart';
 
 class BehavioralPsychosocialScreen extends StatefulWidget {
   final Map<String, double> prevDomainScores;
@@ -61,53 +61,40 @@ class _RiskCalc {
   });
 }
 
-class _HealthRange {
-  final double minWeight;
-  final double maxWeight;
-  final double minHeight;
-  final double maxHeight;
-  final double minMuac;
-  final double maxMuac;
-  final double minHb;
-  final double maxHb;
-  final double minBirthWeight;
-
-  const _HealthRange({
-    required this.minWeight,
-    required this.maxWeight,
-    required this.minHeight,
-    required this.maxHeight,
-    required this.minMuac,
-    required this.maxMuac,
-    required this.minHb,
-    required this.maxHb,
-    required this.minBirthWeight,
-  });
-}
-
 class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScreen> {
   final LocalDBService _localDb = LocalDBService();
   final APIService _api = APIService();
+  static const int _sectionCount = 3;
 
   final Map<int, int> _autismAnswers = {};
   final Map<int, int> _adhdAnswers = {};
   final Map<int, int> _behaviorAnswers = {};
 
-  final TextEditingController _weightController = TextEditingController();
-  final TextEditingController _heightController = TextEditingController();
-  final TextEditingController _muacController = TextEditingController();
-  final TextEditingController _birthWeightController = TextEditingController();
-  final TextEditingController _hemoglobinController = TextEditingController();
-  String _recentIllness = 'No';
-
   bool _submitting = false;
   ChildModel? _child;
   late final NeuroQuestionSet _set;
+  int _sectionIndex = 0;
+  int _questionIndex = 0;
 
   @override
   void initState() {
     super.initState();
+    NavigationStateService.instance.saveState(
+      screen: NavigationStateService.screenBehavioralPsychosocial,
+      args: <String, dynamic>{
+        'child_id': widget.childId,
+        'aww_id': widget.awwId,
+        'age_months': widget.ageMonths,
+        'overall_risk': widget.overallRisk,
+        'missed_milestones': widget.missedMilestones,
+        'explainability': widget.explainability,
+        'prev_domain_scores': widget.prevDomainScores,
+        'domain_risk_levels': widget.domainRiskLevels ?? <String, String>{},
+        'delay_summary': widget.delaySummary ?? <String, int>{},
+      },
+    );
     _set = NeuroBehavioralQuestionBank.forAgeMonths(widget.ageMonths);
+    _sectionIndex = _firstNonEmptySectionIndex();
     _loadChild();
   }
 
@@ -125,43 +112,7 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
 
   @override
   void dispose() {
-    _weightController.dispose();
-    _heightController.dispose();
-    _muacController.dispose();
-    _birthWeightController.dispose();
-    _hemoglobinController.dispose();
     super.dispose();
-  }
-
-  _HealthRange _healthRangeForAge(int ageMonths) {
-    if (ageMonths <= 3) {
-      return const _HealthRange(minWeight: 5.0, maxWeight: 6.0, minHeight: 57, maxHeight: 61, minMuac: 13.0, maxMuac: 13.8, minHb: 14, maxHb: 20, minBirthWeight: 2.5);
-    }
-    if (ageMonths <= 6) {
-      return const _HealthRange(minWeight: 6.0, maxWeight: 7.5, minHeight: 61, maxHeight: 66, minMuac: 13.5, maxMuac: 14.5, minHb: 11, maxHb: 14, minBirthWeight: 2.5);
-    }
-    if (ageMonths <= 9) {
-      return const _HealthRange(minWeight: 7.0, maxWeight: 8.5, minHeight: 66, maxHeight: 71, minMuac: 14.0, maxMuac: 15.0, minHb: 11, maxHb: 13, minBirthWeight: 2.5);
-    }
-    if (ageMonths <= 12) {
-      return const _HealthRange(minWeight: 8.0, maxWeight: 9.5, minHeight: 70, maxHeight: 75, minMuac: 14.5, maxMuac: 15.5, minHb: 11, maxHb: 13, minBirthWeight: 2.5);
-    }
-    if (ageMonths <= 18) {
-      return const _HealthRange(minWeight: 9.0, maxWeight: 11.0, minHeight: 75, maxHeight: 82, minMuac: 15.0, maxMuac: 16.0, minHb: 11, maxHb: 13, minBirthWeight: 2.5);
-    }
-    if (ageMonths <= 24) {
-      return const _HealthRange(minWeight: 10.5, maxWeight: 12.5, minHeight: 82, maxHeight: 88, minMuac: 15.5, maxMuac: 16.5, minHb: 11, maxHb: 13, minBirthWeight: 2.5);
-    }
-    if (ageMonths <= 36) {
-      return const _HealthRange(minWeight: 12.0, maxWeight: 14.5, minHeight: 88, maxHeight: 96, minMuac: 16.0, maxMuac: 17.0, minHb: 11, maxHb: 13, minBirthWeight: 2.5);
-    }
-    if (ageMonths <= 48) {
-      return const _HealthRange(minWeight: 14.0, maxWeight: 17.0, minHeight: 96, maxHeight: 105, minMuac: 16.5, maxMuac: 17.5, minHb: 11, maxHb: 13.5, minBirthWeight: 2.5);
-    }
-    if (ageMonths <= 60) {
-      return const _HealthRange(minWeight: 16.0, maxWeight: 20.0, minHeight: 105, maxHeight: 112, minMuac: 17.0, maxMuac: 18.0, minHb: 11.5, maxHb: 13.5, minBirthWeight: 2.5);
-    }
-    return const _HealthRange(minWeight: 18.0, maxWeight: 23.0, minHeight: 112, maxHeight: 120, minMuac: 17.5, maxMuac: 18.5, minHb: 11.5, maxHb: 14.0, minBirthWeight: 2.5);
   }
 
   String _riskLabelFromCode(int code) {
@@ -172,6 +123,43 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
         return 'Medium';
       default:
         return 'Low';
+    }
+  }
+
+  String _normalizeRiskLabel(dynamic value, {String fallback = 'Low'}) {
+    final raw = '$value'.trim().toLowerCase();
+    if (raw == 'critical' || raw == 'very high') return 'Critical';
+    if (raw == 'high') return 'High';
+    if (raw == 'medium' || raw == 'moderate') return 'Medium';
+    if (raw == 'low') return 'Low';
+    return fallback;
+  }
+
+  RiskLevel _riskLevelFromLabel(String label) {
+    switch (label.trim().toLowerCase()) {
+      case 'critical':
+        return RiskLevel.critical;
+      case 'high':
+        return RiskLevel.high;
+      case 'medium':
+      case 'moderate':
+        return RiskLevel.medium;
+      default:
+        return RiskLevel.low;
+    }
+  }
+
+  double _riskScoreFromLabel(String label) {
+    switch (label.trim().toLowerCase()) {
+      case 'critical':
+        return 0.92;
+      case 'high':
+        return 0.75;
+      case 'medium':
+      case 'moderate':
+        return 0.5;
+      default:
+        return 0.2;
     }
   }
 
@@ -223,15 +211,254 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
     return reasons;
   }
 
-  Future<void> _saveSectionDraft(String title, Map<int, int> answers, int expected) async {
-    if (answers.length != expected) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Please answer all questions ($title).')),
-      );
+  int _firstNonEmptySectionIndex() {
+    for (var i = 0; i < _sectionCount; i++) {
+      if (_questionsForSection(i).isNotEmpty) {
+        return i;
+      }
+    }
+    return _sectionCount;
+  }
+
+  List<NeuroQuestion> _questionsForSection(int sectionIndex) {
+    switch (sectionIndex) {
+      case 0:
+        return _set.autism;
+      case 1:
+        return _set.adhd;
+      case 2:
+      default:
+        return _set.behavior;
+    }
+  }
+
+  Map<int, int> _answersForSection(int sectionIndex) {
+    switch (sectionIndex) {
+      case 0:
+        return _autismAnswers;
+      case 1:
+        return _adhdAnswers;
+      case 2:
+      default:
+        return _behaviorAnswers;
+    }
+  }
+
+  String _sectionTitle(int sectionIndex) {
+    switch (sectionIndex) {
+      case 0:
+        return 'Autism Risk';
+      case 1:
+        return 'ADHD Risk';
+      case 2:
+      default:
+        return 'Behavior Risk';
+    }
+  }
+
+  String _sectionCode(int sectionIndex) {
+    switch (sectionIndex) {
+      case 0:
+        return 'AUT';
+      case 1:
+        return 'ADHD';
+      case 2:
+      default:
+        return 'BEH';
+    }
+  }
+
+  int _answeredCountForSection(int sectionIndex) {
+    final total = _questionsForSection(sectionIndex).length;
+    final answers = _answersForSection(sectionIndex);
+    var answered = 0;
+    for (var i = 0; i < total; i++) {
+      if (answers.containsKey(i)) {
+        answered += 1;
+      }
+    }
+    return answered;
+  }
+
+  int get _totalQuestions => _set.autism.length + _set.adhd.length + _set.behavior.length;
+
+  int get _totalAnswered {
+    var answered = 0;
+    for (var i = 0; i < _sectionCount; i++) {
+      answered += _answeredCountForSection(i);
+    }
+    return answered;
+  }
+
+  double get _progress {
+    if (_totalQuestions == 0) return 0;
+    return (_totalAnswered / _totalQuestions).clamp(0.0, 1.0);
+  }
+
+  bool get _isQuestionFlowComplete => _sectionIndex >= _sectionCount;
+
+  void _moveToNextQuestion() {
+    if (_isQuestionFlowComplete) return;
+    final currentQuestions = _questionsForSection(_sectionIndex);
+    if (_questionIndex + 1 < currentQuestions.length) {
+      _questionIndex += 1;
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$title saved locally')),
+    var nextSection = _sectionIndex + 1;
+    while (nextSection < _sectionCount) {
+      if (_questionsForSection(nextSection).isNotEmpty) {
+        break;
+      }
+      nextSection += 1;
+    }
+    _sectionIndex = nextSection;
+    _questionIndex = 0;
+  }
+
+  void _moveToPreviousQuestion() {
+    if (_sectionIndex == 0 && _questionIndex == 0) return;
+    if (_isQuestionFlowComplete) {
+      var lastSection = _sectionCount - 1;
+      while (lastSection >= 0 && _questionsForSection(lastSection).isEmpty) {
+        lastSection -= 1;
+      }
+      if (lastSection < 0) return;
+      _sectionIndex = lastSection;
+      _questionIndex = _questionsForSection(lastSection).length - 1;
+      return;
+    }
+    if (_questionIndex > 0) {
+      _questionIndex -= 1;
+      return;
+    }
+    var prevSection = _sectionIndex - 1;
+    while (prevSection >= 0) {
+      if (_questionsForSection(prevSection).isNotEmpty) {
+        break;
+      }
+      prevSection -= 1;
+    }
+    if (prevSection < 0) return;
+    _sectionIndex = prevSection;
+    _questionIndex = _questionsForSection(prevSection).length - 1;
+  }
+
+  void _answerCurrentQuestion(bool yes) {
+    if (_isQuestionFlowComplete || _submitting) return;
+    final answers = _answersForSection(_sectionIndex);
+    answers[_questionIndex] = yes ? 1 : 0;
+    setState(() {
+      _moveToNextQuestion();
+    });
+  }
+
+  void _retakeAssessment() {
+    setState(() {
+      _autismAnswers.clear();
+      _adhdAnswers.clear();
+      _behaviorAnswers.clear();
+      _sectionIndex = _firstNonEmptySectionIndex();
+      _questionIndex = 0;
+      _submitting = false;
+    });
+  }
+
+  Future<void> _showCompletedBackOptions() async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Development Assessment Completed'),
+          content: const Text(
+            'Choose an action: retake this assessment or move to the next assessment.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                _retakeAssessment();
+              },
+              child: const Text('Retake Assessment'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.of(dialogContext).pop();
+                await _submit();
+              },
+              child: const Text('Move to Next Assessment'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Color _riskColor(String risk) {
+    switch (risk.trim().toLowerCase()) {
+      case 'critical':
+      case 'high':
+        return const Color(0xFFC62828);
+      case 'medium':
+      case 'moderate':
+        return const Color(0xFFF9A825);
+      default:
+        return const Color(0xFF2E7D32);
+    }
+  }
+
+  Future<void> _showNeuroRiskTable({
+    required String autismRisk,
+    required String adhdRisk,
+    required String behavioralRisk,
+  }) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        final rows = <Map<String, String>>[
+          {'domain': 'AUTISM', 'risk': autismRisk},
+          {'domain': 'ADHD', 'risk': adhdRisk},
+          {'domain': 'BEHAVIORAL', 'risk': behavioralRisk},
+        ];
+        return AlertDialog(
+          title: const Text('Neuro Behavioral Risk Table'),
+          content: SizedBox(
+            width: 420,
+            child: DataTable(
+              columns: const [
+                DataColumn(label: Text('Domain')),
+                DataColumn(label: Text('Risk')),
+              ],
+              rows: rows
+                  .map(
+                    (row) => DataRow(
+                      cells: [
+                        DataCell(Text(row['domain'] ?? '-')),
+                        DataCell(
+                          Text(
+                            _normalizeRiskLabel(row['risk'], fallback: 'Low').toUpperCase(),
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: _riskColor(row['risk'] ?? 'Low'),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                  .toList(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Continue'),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -245,31 +472,13 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
       return;
     }
 
-    final weight = double.tryParse(_weightController.text.trim());
-    final height = double.tryParse(_heightController.text.trim());
-    final muac = double.tryParse(_muacController.text.trim());
-    final birthWeight = _birthWeightController.text.trim().isEmpty
-        ? null
-        : double.tryParse(_birthWeightController.text.trim());
-    final hb = double.tryParse(_hemoglobinController.text.trim());
-
-    if (weight == null || height == null || muac == null || hb == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill health parameters (weight, height, MUAC, hemoglobin).')),
-      );
-      return;
-    }
-
     setState(() => _submitting = true);
 
     final autismCalc = _computeRisk(_set.autism, _autismAnswers);
     final adhdCalc = _computeRisk(_set.adhd, _adhdAnswers);
     final behaviorCalc = _computeRisk(_set.behavior, _behaviorAnswers);
-    final worstCode = [autismCalc.code, adhdCalc.code, behaviorCalc.code].reduce((a, b) => a > b ? a : b);
-
-    final overallRiskEnum = worstCode == 2
-        ? RiskLevel.high
-        : (worstCode == 1 ? RiskLevel.medium : RiskLevel.low);
+    final worstCode = [autismCalc.code, adhdCalc.code, behaviorCalc.code]
+        .reduce((a, b) => a > b ? a : b);
 
     final reasons = <String>[
       ..._deriveReasons(_set.autism, _autismAnswers),
@@ -277,35 +486,135 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
       ..._deriveReasons(_set.behavior, _behaviorAnswers),
     ];
 
+    final domainResponses = {
+      'BPS_AUT': [for (var i = 0; i < _set.autism.length; i++) _autismAnswers[i] ?? 0],
+      'BPS_ADHD': [for (var i = 0; i < _set.adhd.length; i++) _adhdAnswers[i] ?? 0],
+      'BPS_BEH': [for (var i = 0; i < _set.behavior.length; i++) _behaviorAnswers[i] ?? 0],
+    };
+
+    var autismRiskLabel = _riskLabelFromCode(autismCalc.code);
+    var adhdRiskLabel = _riskLabelFromCode(adhdCalc.code);
+    var behaviorRiskLabel = _riskLabelFromCode(behaviorCalc.code);
+    var overallRiskLabel = _riskLabelFromCode(worstCode);
+    var explainabilityText = reasons.isEmpty ? 'No major risk triggers' : reasons.join(', ');
+
+    DateTime? submittedAt;
+    final payload = {
+      'child_id': widget.childId,
+      'awc_id': _child?.awcCode ?? '',
+      'assessment_type': 'behavioural_psychosocial',
+      'age_months': widget.ageMonths,
+      'domain_responses': domainResponses,
+      'domain_scores': {
+        'BPS_AUT': autismCalc.normalizedRisk,
+        'BPS_ADHD': adhdCalc.normalizedRisk,
+        'BPS_BEH': behaviorCalc.normalizedRisk,
+      },
+      'autism_risk': autismRiskLabel,
+      'adhd_risk': adhdRiskLabel,
+      'behavior_risk': behaviorRiskLabel,
+      'overall_risk': overallRiskLabel,
+      'method': 'weighted_score_two_thresholds_sigmoid',
+      'thresholds': {'t1_ratio': 0.33, 't2_ratio': 0.66},
+    };
+
+    try {
+      final response = await _api.submitScreening(payload);
+      submittedAt = DateTime.now();
+
+      final responseDomainScores = response['domain_scores'];
+      if (responseDomainScores is Map) {
+        autismRiskLabel = _normalizeRiskLabel(
+          responseDomainScores['BPS_AUT'],
+          fallback: autismRiskLabel,
+        );
+        adhdRiskLabel = _normalizeRiskLabel(
+          responseDomainScores['BPS_ADHD'],
+          fallback: adhdRiskLabel,
+        );
+        behaviorRiskLabel = _normalizeRiskLabel(
+          responseDomainScores['BPS_BEH'],
+          fallback: behaviorRiskLabel,
+        );
+      }
+      overallRiskLabel = _normalizeRiskLabel(
+        response['risk_level'],
+        fallback: overallRiskLabel,
+      );
+
+      final explanationList = response['explanation'];
+      if (explanationList is List && explanationList.isNotEmpty) {
+        final backendExplainability = explanationList
+            .map((e) => '$e')
+            .where((e) => e.trim().isNotEmpty)
+            .join(', ');
+        if (backendExplainability.trim().isNotEmpty) {
+          explainabilityText = backendExplainability;
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Failed to submit neuro-behavioral assessment to server. '
+              'Please check backend/database connection and try again.\n$e',
+            ),
+          ),
+        );
+        setState(() => _submitting = false);
+      }
+      return;
+    }
+
     final screening = ScreeningModel(
       screeningId: 'bsp_${DateTime.now().millisecondsSinceEpoch}',
       childId: widget.childId,
       awwId: widget.awwId,
       assessmentType: AssessmentType.baseline,
       ageMonths: widget.ageMonths,
-      domainResponses: {
-        'BPS_AUT': [for (var i = 0; i < _set.autism.length; i++) _autismAnswers[i] ?? 0],
-        'BPS_ADHD': [for (var i = 0; i < _set.adhd.length; i++) _adhdAnswers[i] ?? 0],
-        'BPS_BEH': [for (var i = 0; i < _set.behavior.length; i++) _behaviorAnswers[i] ?? 0],
-      },
+      domainResponses: domainResponses,
       domainScores: {
-        'BPS_AUT': autismCalc.normalizedRisk,
-        'BPS_ADHD': adhdCalc.normalizedRisk,
-        'BPS_BEH': behaviorCalc.normalizedRisk,
+        'BPS_AUT': _riskScoreFromLabel(autismRiskLabel),
+        'BPS_ADHD': _riskScoreFromLabel(adhdRiskLabel),
+        'BPS_BEH': _riskScoreFromLabel(behaviorRiskLabel),
       },
-      overallRisk: overallRiskEnum,
+      overallRisk: _riskLevelFromLabel(overallRiskLabel),
       explainability: jsonEncode({
         'method': 'weighted_score_two_thresholds_sigmoid',
-        'autism': {'score': autismCalc.weightedScore, 'max': autismCalc.maxScore, 't1': autismCalc.t1, 't2': autismCalc.t2, 'p1': autismCalc.p1, 'p2': autismCalc.p2, 'risk_code': autismCalc.code},
-        'adhd': {'score': adhdCalc.weightedScore, 'max': adhdCalc.maxScore, 't1': adhdCalc.t1, 't2': adhdCalc.t2, 'p1': adhdCalc.p1, 'p2': adhdCalc.p2, 'risk_code': adhdCalc.code},
-        'behavior': {'score': behaviorCalc.weightedScore, 'max': behaviorCalc.maxScore, 't1': behaviorCalc.t1, 't2': behaviorCalc.t2, 'p1': behaviorCalc.p1, 'p2': behaviorCalc.p2, 'risk_code': behaviorCalc.code},
-        'health_parameters': {
-          'weight_kg': weight,
-          'height_cm': height,
-          'muac_cm': muac,
-          'birth_weight_kg': birthWeight,
-          'hemoglobin_g_dl': hb,
-          'recent_illness': _recentIllness,
+        'autism': {
+          'score': autismCalc.weightedScore,
+          'max': autismCalc.maxScore,
+          't1': autismCalc.t1,
+          't2': autismCalc.t2,
+          'p1': autismCalc.p1,
+          'p2': autismCalc.p2,
+          'risk_code': autismCalc.code,
+        },
+        'adhd': {
+          'score': adhdCalc.weightedScore,
+          'max': adhdCalc.maxScore,
+          't1': adhdCalc.t1,
+          't2': adhdCalc.t2,
+          'p1': adhdCalc.p1,
+          'p2': adhdCalc.p2,
+          'risk_code': adhdCalc.code,
+        },
+        'behavior': {
+          'score': behaviorCalc.weightedScore,
+          'max': behaviorCalc.maxScore,
+          't1': behaviorCalc.t1,
+          't2': behaviorCalc.t2,
+          'p1': behaviorCalc.p1,
+          'p2': behaviorCalc.p2,
+          'risk_code': behaviorCalc.code,
+        },
+        'backend_model': {
+          'autism_risk': autismRiskLabel,
+          'adhd_risk': adhdRiskLabel,
+          'behavior_risk': behaviorRiskLabel,
+          'overall_risk': overallRiskLabel,
+          'explanation': explainabilityText,
         },
         'risk_triggers': reasons.take(12).toList(),
       }),
@@ -315,80 +624,54 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
       consentTimestamp: DateTime.now(),
       referralTriggered: false,
       screeningDate: DateTime.now(),
-      submittedAt: null,
+      submittedAt: submittedAt,
     );
 
     await _localDb.saveScreening(screening);
-
-    final payload = {
-      'child_id': widget.childId,
-      'awc_id': _child?.awcCode ?? '',
-      'assessment_type': 'behavioural_psychosocial',
-      'age_months': widget.ageMonths,
-      'domain_responses': screening.domainResponses,
-      'domain_scores': screening.domainScores,
-      'autism_risk': autismCalc.code,
-      'adhd_risk': adhdCalc.code,
-      'behavior_risk': behaviorCalc.code,
-      'overall_risk': worstCode,
-      'method': 'weighted_score_two_thresholds_sigmoid',
-      'thresholds': {'t1_ratio': 0.33, 't2_ratio': 0.66},
-      'health_parameters': {
-        'weight_kg': weight,
-        'height_cm': height,
-        'muac_cm': muac,
-        'birth_weight_kg': birthWeight,
-        'hemoglobin_g_dl': hb,
-        'recent_illness': _recentIllness,
-      },
-    };
-
-    try {
-      await _api.submitScreening(payload);
-      await _localDb.saveScreening(screening.copyWith(submittedAt: DateTime.now()));
-    } catch (_) {
-      // Offline path: keep unsynced locally.
-    }
 
     if (!mounted) return;
     setState(() => _submitting = false);
 
     final summaryDomainScores = {
       ...widget.prevDomainScores,
-      'BPS_AUT': autismCalc.normalizedRisk,
-      'BPS_ADHD': adhdCalc.normalizedRisk,
-      'BPS_BEH': behaviorCalc.normalizedRisk,
+      'BPS_AUT': _riskScoreFromLabel(autismRiskLabel),
+      'BPS_ADHD': _riskScoreFromLabel(adhdRiskLabel),
+      'BPS_BEH': _riskScoreFromLabel(behaviorRiskLabel),
     };
     final summaryDomainRiskLevels = {
       ...?widget.domainRiskLevels,
-      'BPS_AUT': _riskLabelFromCode(autismCalc.code),
-      'BPS_ADHD': _riskLabelFromCode(adhdCalc.code),
-      'BPS_BEH': _riskLabelFromCode(behaviorCalc.code),
+      'BPS_AUT': autismRiskLabel,
+      'BPS_ADHD': adhdRiskLabel,
+      'BPS_BEH': behaviorRiskLabel,
     };
 
-    Navigator.of(context).pushReplacement(
+    await _showNeuroRiskTable(
+      autismRisk: autismRiskLabel,
+      adhdRisk: adhdRiskLabel,
+      behavioralRisk: behaviorRiskLabel,
+    );
+    if (!mounted) return;
+    final awcCodeForFlow = widget.awwId.trim().isNotEmpty
+        ? widget.awwId.trim()
+        : (_child?.awcCode ?? '').trim();
+
+    Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => ProblemAEnvironmentScreen(
+        builder: (_) => NutritionScreen(
           childId: widget.childId,
-          awwId: widget.awwId,
+          awwId: awcCodeForFlow,
           ageMonths: widget.ageMonths,
           genderLabel: AppLocalizations.of(context).t((_child?.gender ?? 'M') == 'F' ? 'gender_female' : 'gender_male'),
           genderCode: (_child?.gender ?? 'M'),
-          awcCode: _child?.awcCode ?? '',
-          overallRisk: _riskLabelFromCode(worstCode),
-          autismRisk: _riskLabelFromCode(autismCalc.code),
-          adhdRisk: _riskLabelFromCode(adhdCalc.code),
-          behaviorRisk: _riskLabelFromCode(behaviorCalc.code),
-          weightKg: weight,
-          heightCm: height,
-          muacCm: muac,
-          birthWeightKg: birthWeight,
-          hemoglobin: hb,
-          recentIllness: _recentIllness,
+          awcCode: awcCodeForFlow,
+          overallRisk: overallRiskLabel,
+          autismRisk: autismRiskLabel,
+          adhdRisk: adhdRiskLabel,
+          behaviorRisk: behaviorRiskLabel,
           domainScores: summaryDomainScores,
           domainRiskLevels: summaryDomainRiskLevels,
           missedMilestones: widget.missedMilestones,
-          explainability: reasons.isEmpty ? 'No major risk triggers' : reasons.join(', '),
+          explainability: explainabilityText,
           delaySummary: widget.delaySummary,
         ),
       ),
@@ -398,197 +681,255 @@ class _BehavioralPsychosocialScreenState extends State<BehavioralPsychosocialScr
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final range = _healthRangeForAge(widget.ageMonths);
-    final totalAnswered = _autismAnswers.length + _adhdAnswers.length + _behaviorAnswers.length;
-    final totalQuestions = _set.autism.length + _set.adhd.length + _set.behavior.length;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(l10n.t('behavioural_psychosocial_screen_title')),
-        backgroundColor: const Color(0xFF0D5BA7),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).maybePop(),
+    return PopScope(
+      canPop: !_isQuestionFlowComplete && !_submitting,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop || _submitting) return;
+        if (_isQuestionFlowComplete) {
+          await _showCompletedBackOptions();
+          return;
+        }
+        if (Navigator.of(context).canPop()) {
+          Navigator.of(context).pop(result);
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(l10n.t('behavioural_psychosocial_screen_title')),
+          backgroundColor: const Color(0xFF0D5BA7),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () => Navigator.of(context).maybePop(),
+          ),
+        ),
+        body: Column(
+          children: [
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF46C39D), Color(0xFF2CA38C)],
+                ),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Assessment for Neuro-Behavioral',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _child?.childName ?? widget.childId,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${l10n.t('age_with_months', {'age': '${widget.ageMonths}'})}  |  AWC: ${_child?.awcCode ?? '-'}',
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  const SizedBox(height: 8),
+                  LinearProgressIndicator(
+                    value: _progress,
+                    minHeight: 6,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Answered: $_totalAnswered / $_totalQuestions | Age: ${widget.ageMonths} months',
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: List.generate(
+                      _sectionCount,
+                      _buildSectionPill,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                child: _isQuestionFlowComplete
+                    ? SingleChildScrollView(
+                        child: Column(
+                          children: [
+                            _buildCompleteCard(),
+                          ],
+                        ),
+                      )
+                    : _buildQuestionFlowCard(l10n),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: (!_isQuestionFlowComplete || _submitting) ? null : _submit,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2F95EA),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: Text(_submitting ? l10n.t('submitting') : l10n.t('submit_assessment')),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
-      body: Column(
+    );
+  }
+
+  Widget _buildSectionPill(int sectionIndex) {
+    final total = _questionsForSection(sectionIndex).length;
+    final answered = _answeredCountForSection(sectionIndex);
+    final done = total > 0 && answered >= total;
+    final active = !_isQuestionFlowComplete && sectionIndex == _sectionIndex;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: active
+            ? const Color(0xFF1565C0)
+            : (done ? const Color(0xFF2E7D32) : const Color(0xFFCFD8DC)),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Text(
+        '${_sectionCode(sectionIndex)} $answered/$total',
+        style: TextStyle(
+          color: active || done ? Colors.white : const Color(0xFF37474F),
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildQuestionFlowCard(AppLocalizations l10n) {
+    final questions = _questionsForSection(_sectionIndex);
+    final questionText = questions[_questionIndex].text;
+    final sectionTitle = _sectionTitle(_sectionIndex);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFD6E1EA)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: double.infinity,
-            color: const Color(0xFFF6FAFF),
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Screening 2/4 - Neuro-Behavioral', style: TextStyle(color: Color(0xFF37474F), fontWeight: FontWeight.w700)),
-                const SizedBox(height: 8),
-                Text(_child?.childName ?? widget.childId, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-                const SizedBox(height: 4),
-                Text(
-                  '${l10n.t('age_with_months', {'age': '${widget.ageMonths}'})}  |  AWC: ${_child?.awcCode ?? '-'}',
-                  style: const TextStyle(color: Color(0xFF6B7C8D)),
-                ),
-                const SizedBox(height: 10),
-                LinearProgressIndicator(
-                  value: totalQuestions == 0 ? 0 : (totalAnswered / totalQuestions).clamp(0.0, 1.0),
-                  minHeight: 6,
-                  backgroundColor: Colors.grey[200],
-                  valueColor: const AlwaysStoppedAnimation(Color(0xFF0D5BA7)),
-                ),
-              ],
+          Text(
+            sectionTitle,
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF0D5BA7),
             ),
           ),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.all(12),
-              children: [
-                _sectionHeader('Autism Risk', Icons.psychology_alt),
-                const SizedBox(height: 6),
-                ...List.generate(_set.autism.length, (i) {
-                  return QuestionCard(
-                    question: _set.autism[i].text,
-                    value: _autismAnswers[i],
-                    onChanged: (v) => setState(() => _autismAnswers[i] = v),
-                  );
-                }),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton.icon(
-                    onPressed: () => _saveSectionDraft('Autism', _autismAnswers, _set.autism.length),
-                    icon: const Icon(Icons.save_outlined),
-                    label: const Text('Save Autism Section'),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _sectionHeader('ADHD Risk', Icons.bolt),
-                const SizedBox(height: 6),
-                ...List.generate(_set.adhd.length, (i) {
-                  return QuestionCard(
-                    question: _set.adhd[i].text,
-                    value: _adhdAnswers[i],
-                    onChanged: (v) => setState(() => _adhdAnswers[i] = v),
-                  );
-                }),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton.icon(
-                    onPressed: () => _saveSectionDraft('ADHD', _adhdAnswers, _set.adhd.length),
-                    icon: const Icon(Icons.save_outlined),
-                    label: const Text('Save ADHD Section'),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _sectionHeader('Behavior Risk', Icons.people_alt_outlined),
-                const SizedBox(height: 6),
-                ...List.generate(_set.behavior.length, (i) {
-                  return QuestionCard(
-                    question: _set.behavior[i].text,
-                    value: _behaviorAnswers[i],
-                    onChanged: (v) => setState(() => _behaviorAnswers[i] = v),
-                  );
-                }),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton.icon(
-                    onPressed: () => _saveSectionDraft('Behavior', _behaviorAnswers, _set.behavior.length),
-                    icon: const Icon(Icons.save_outlined),
-                    label: const Text('Save Behavior Section'),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _sectionHeader('Health Parameters (Age-based)', Icons.health_and_safety_outlined),
-                const SizedBox(height: 6),
-                Container(
-                  width: double.infinity,
-                  margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF8FCFF),
-                    border: Border.all(color: const Color(0xFFCAE6F7)),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    'Expected for age:\n'
-                    'Weight: ${range.minWeight}-${range.maxWeight} kg\n'
-                    'Height: ${range.minHeight}-${range.maxHeight} cm\n'
-                    'MUAC: ${range.minMuac}-${range.maxMuac} cm\n'
-                    'Hemoglobin: ${range.minHb}-${range.maxHb} g/dL\n'
-                    'Birth weight: >= ${range.minBirthWeight} kg\n'
-                    'Recent illness: No',
-                    style: const TextStyle(fontWeight: FontWeight.w600, height: 1.35),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _weightController,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'Weight (kg)', border: OutlineInputBorder()),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _heightController,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'Height (cm)', border: OutlineInputBorder()),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _muacController,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'MUAC (cm)', border: OutlineInputBorder()),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _birthWeightController,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'Birth Weight (kg) - optional', border: OutlineInputBorder()),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _hemoglobinController,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'Hemoglobin (g/dL)', border: OutlineInputBorder()),
-                ),
-                const SizedBox(height: 8),
-                DropdownButtonFormField<String>(
-                  initialValue: _recentIllness,
-                  decoration: const InputDecoration(labelText: 'Recent Illness', border: OutlineInputBorder()),
-                  items: const [
-                    DropdownMenuItem(value: 'No', child: Text('No')),
-                    DropdownMenuItem(value: 'Yes', child: Text('Yes')),
-                  ],
-                  onChanged: (v) {
-                    if (v == null) return;
-                    setState(() => _recentIllness = v);
-                  },
-                ),
-                const SizedBox(height: 18),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                  child: ElevatedButton(
-                    onPressed: _submitting ? null : _submit,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2F95EA),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                    child: Text(_submitting ? l10n.t('submitting') : l10n.t('submit_assessment')),
-                  ),
-                ),
-                const SizedBox(height: 30),
-              ],
+          const SizedBox(height: 4),
+          Text(
+            'Question ${_questionIndex + 1} of ${questions.length}',
+            style: const TextStyle(
+              color: Color(0xFF546E7A),
+              fontWeight: FontWeight.w600,
             ),
+          ),
+          const Divider(height: 24),
+          Text(
+            questionText,
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w500,
+              color: Color(0xFF1F2A37),
+            ),
+          ),
+          const Spacer(),
+          if (!(_sectionIndex == 0 && _questionIndex == 0)) ...[
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () => setState(_moveToPreviousQuestion),
+                icon: const Icon(Icons.arrow_back),
+                label: const Text('Previous Question'),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: _submitting ? null : () => _answerCurrentQuestion(true),
+                  child: Text(l10n.t('yes')),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: _submitting ? null : () => _answerCurrentQuestion(false),
+                  child: Text(l10n.t('no')),
+                ),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  Widget _sectionHeader(String title, IconData icon) {
-    return Row(
-      children: [
-        Icon(icon, color: const Color(0xFF2A6EBB)),
-        const SizedBox(width: 8),
-        Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
-      ],
+  Widget _buildCompleteCard() {
+    final concernDomains = <String>[];
+    if (_autismAnswers.values.any((v) => v == 1)) concernDomains.add('Autism Risk');
+    if (_adhdAnswers.values.any((v) => v == 1)) concernDomains.add('ADHD Risk');
+    if (_behaviorAnswers.values.any((v) => v == 1)) concernDomains.add('Behavior Risk');
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE8F5E9),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFA5D6A7)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Assessment complete',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Text('Answered $_totalAnswered of $_totalQuestions questions.'),
+          const SizedBox(height: 8),
+          Text(
+            concernDomains.isEmpty
+                ? 'Potential concern domains: None flagged'
+                : 'Potential concern domains: ${concernDomains.join(', ')}',
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 8),
+          const Text('Tap Submit Assessment to continue to Nutrition Screening.'),
+        ],
+      ),
     );
   }
+
 }

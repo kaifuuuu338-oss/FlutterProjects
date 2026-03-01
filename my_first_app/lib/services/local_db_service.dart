@@ -49,6 +49,8 @@ class LocalDBService {
   Future<void> deleteChild(String childId) async {
     _children.remove(childId);
     _unsyncedChildIds.remove(childId);
+    _screenings.removeWhere((_, screening) => screening.childId == childId);
+    _referrals.removeWhere((_, referral) => referral.childId == childId);
   }
 
   Future<void> saveScreening(ScreeningModel screening) async {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
+import 'package:my_first_app/core/navigation/navigation_state_service.dart';
 
 class FollowupCompleteScreen extends StatefulWidget {
   final String referralId;
@@ -30,6 +31,14 @@ class _FollowupCompleteScreenState extends State<FollowupCompleteScreen> {
   @override
   void initState() {
     super.initState();
+    NavigationStateService.instance.saveState(
+      screen: NavigationStateService.screenFollowUpComplete,
+      args: <String, dynamic>{
+        'child_id': widget.childId,
+        'referral_id': widget.referralId,
+        'user_role': widget.userRole,
+      },
+    );
     _initDio();
     _loadFollowUpData();
   }

@@ -62,6 +62,22 @@ class APIService {
     return error.message ?? 'Network error';
   }
 
+  List<Map<String, dynamic>> _dedupeChildrenById(List<dynamic> rawItems) {
+    final deduped = <Map<String, dynamic>>[];
+    final seenIds = <String>{};
+    for (final item in rawItems) {
+      if (item is! Map) continue;
+      final row = Map<String, dynamic>.from(item);
+      final childId = (row['child_id'] ?? '').toString().trim();
+      if (childId.isEmpty) continue;
+      final key = childId.toLowerCase();
+      if (seenIds.contains(key)) continue;
+      seenIds.add(key);
+      deduped.add(row);
+    }
+    return deduped;
+  }
+
   Future<Response<dynamic>> _retry(RequestOptions requestOptions) async {
     final options = Options(
       method: requestOptions.method,
@@ -168,6 +184,78 @@ class APIService {
     }
   }
 
+  /// Predict domain delays without creating referral or saving screening.
+  Future<Map<String, dynamic>> predictDomainDelays(
+    Map<String, dynamic> screeningData,
+  ) async {
+    try {
+      final response = await _dio.post(
+        '/screening/predict-domain-delays',
+        data: screeningData,
+      );
+      final data = response.data;
+      if (data is Map<String, dynamic>) {
+        return data;
+      }
+      if (data is Map) {
+        return Map<String, dynamic>.from(data);
+      }
+      throw Exception('Unexpected prediction response format');
+    } on DioException catch (e) {
+      throw Exception(
+        'Domain delay prediction failed: ${_formatDioError(e)}',
+      );
+    }
+  }
+
+  /// Predict nutrition risk from nutrition form features.
+  Future<Map<String, dynamic>> predictNutritionRisk(
+    Map<String, dynamic> nutritionData,
+  ) async {
+    try {
+      final response = await _dio.post(
+        '/nutrition/predict-risk',
+        data: nutritionData,
+      );
+      final data = response.data;
+      if (data is Map<String, dynamic>) {
+        return data;
+      }
+      if (data is Map) {
+        return Map<String, dynamic>.from(data);
+      }
+      throw Exception('Unexpected nutrition prediction response format');
+    } on DioException catch (e) {
+      throw Exception(
+        'Nutrition risk prediction failed: ${_formatDioError(e)}',
+      );
+    }
+  }
+
+  /// Save nutrition assessment result table values.
+  Future<Map<String, dynamic>> submitNutritionResult(
+    Map<String, dynamic> nutritionResultData,
+  ) async {
+    try {
+      final response = await _dio.post(
+        '/nutrition/submit',
+        data: nutritionResultData,
+      );
+      final data = response.data;
+      if (data is Map<String, dynamic>) {
+        return data;
+      }
+      if (data is Map) {
+        return Map<String, dynamic>.from(data);
+      }
+      throw Exception('Unexpected nutrition submit response format');
+    } on DioException catch (e) {
+      throw Exception(
+        'Nutrition result save failed: ${_formatDioError(e)}',
+      );
+    }
+  }
+
   /// Register child profile in backend source DB.
   Future<Map<String, dynamic>> registerChild(
     ChildModel child, {
@@ -178,6 +266,7 @@ class APIService {
       'child_id': child.childId,
       'date_of_birth': dobIso,
       'dob': dobIso,
+      'gender': child.gender,
       'awc_code': child.awcCode,
       'mandal': child.mandal,
       'district': child.district,
@@ -225,13 +314,13 @@ class APIService {
       );
       final data = response.data;
       if (data is Map<String, dynamic>) {
+        final items = data['items'];
+        if (items is List) {
+          return _dedupeChildrenById(items).length;
+        }
         final count = data['count'];
         if (count is num) {
           return count.toInt();
-        }
-        final items = data['items'];
-        if (items is List) {
-          return items.length;
         }
       }
       throw Exception('Unexpected children list response format');
@@ -264,12 +353,40 @@ class APIService {
       if (items is! List) {
         return const <Map<String, dynamic>>[];
       }
-      return items
-          .whereType<Map>()
-          .map((item) => Map<String, dynamic>.from(item))
-          .toList();
+      return _dedupeChildrenById(items);
     } on DioException catch (e) {
       throw Exception('Failed to fetch children list: ${_formatDioError(e)}');
+    }
+  }
+
+  /// Delete one child from backend child_profile (and related records when applicable).
+  Future<Map<String, dynamic>> deleteChild(
+    String childId, {
+    String? awcCode,
+  }) async {
+    final normalizedChildId = childId.trim();
+    if (normalizedChildId.isEmpty) {
+      throw Exception('child_id is required');
+    }
+    final normalizedAwcCode = awcCode?.trim().toUpperCase();
+    try {
+      final response = await _dio.delete(
+        '/children/${Uri.encodeComponent(normalizedChildId)}',
+        queryParameters: {
+          if (normalizedAwcCode != null && normalizedAwcCode.isNotEmpty)
+            'awc_code': normalizedAwcCode,
+        },
+      );
+      final data = response.data;
+      if (data is Map<String, dynamic>) {
+        return data;
+      }
+      if (data is Map) {
+        return Map<String, dynamic>.from(data);
+      }
+      return {'status': 'ok'};
+    } on DioException catch (e) {
+      throw Exception('Failed to delete child: ${_formatDioError(e)}');
     }
   }
 
@@ -598,6 +715,38 @@ class APIService {
       return response.data as Map<String, dynamic>;
     } on DioException catch (e) {
       throw Exception('Referral details fetch failed: ${e.message}');
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getReferralList({
+    int limit = 200,
+    String? awwId,
+  }) async {
+    final normalizedAwwId = awwId?.trim().toUpperCase();
+    final queryParameters = <String, dynamic>{
+      'limit': limit,
+      if (normalizedAwwId != null && normalizedAwwId.isNotEmpty)
+        'aww_id': normalizedAwwId,
+    };
+    try {
+      final response = await _dio.get(
+        '/referral/list',
+        queryParameters: queryParameters,
+      );
+      final data = response.data;
+      if (data is! Map<String, dynamic>) {
+        return const <Map<String, dynamic>>[];
+      }
+      final items = data['items'];
+      if (items is! List) {
+        return const <Map<String, dynamic>>[];
+      }
+      return items
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    } on DioException catch (e) {
+      throw Exception('Referral list fetch failed: ${e.message}');
     }
   }
 

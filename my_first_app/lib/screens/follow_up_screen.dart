@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
+import 'package:my_first_app/core/navigation/navigation_state_service.dart';
 
 class FollowUpScreen extends StatefulWidget {
   final String childId;
@@ -28,6 +29,15 @@ class _FollowUpScreenState extends State<FollowUpScreen> {
   @override
   void initState() {
     super.initState();
+    NavigationStateService.instance.saveState(
+      screen: NavigationStateService.screenFollowUp,
+      args: <String, dynamic>{
+        'child_id': widget.childId,
+        'referral_id': widget.referralId,
+        'base_url': widget.baseUrl,
+        'user_role': widget.userRole,
+      },
+    );
     _dio = Dio(BaseOptions(
       baseUrl: widget.baseUrl,
       contentType: 'application/json',

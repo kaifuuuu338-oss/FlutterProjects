@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:my_first_app/core/localization/app_localizations.dart';
+import 'package:my_first_app/core/navigation/navigation_state_service.dart';
 import 'package:my_first_app/models/child_model.dart';
 import 'package:my_first_app/models/screening_model.dart';
+import 'package:my_first_app/screens/behavioral_psychosocial_screen.dart';
 import 'package:my_first_app/screens/dashboard_screen.dart';
 import 'package:my_first_app/screens/result_screen.dart';
 import 'package:my_first_app/screens/screening_screen.dart';
@@ -31,11 +33,44 @@ class ConsentScreen extends StatefulWidget {
 }
 
 class _ConsentScreenState extends State<ConsentScreen> {
+  static final RegExp _awcCodePattern = RegExp(r'^(AWW|AWS)_DEMO_(\d{3,4})$');
   bool consentGiven = false;
   final LocalDBService _localDb = LocalDBService();
 
-  void _continue() {
-    if (!consentGiven) return;
+  @override
+  void initState() {
+    super.initState();
+    NavigationStateService.instance.saveState(
+      screen: NavigationStateService.screenConsent,
+      args: <String, dynamic>{
+        'child_id': widget.childId,
+        'age_months': widget.ageMonths,
+        'aww_id': widget.awwId,
+        'birth_history': widget.birthHistory,
+        'health_history': widget.healthHistory,
+      },
+    );
+  }
+
+  bool _awcCodesMatch(String left, String right) {
+    final a = left.trim().toUpperCase();
+    final b = right.trim().toUpperCase();
+    if (a.isEmpty || b.isEmpty) {
+      return a == b;
+    }
+    if (a == b) {
+      return true;
+    }
+    final ma = _awcCodePattern.firstMatch(a);
+    final mb = _awcCodePattern.firstMatch(b);
+    if (ma == null || mb == null) {
+      return false;
+    }
+    return ma.group(2) == mb.group(2);
+  }
+
+  Future<void> _openDevelopmentAssessment() async {
+    if (!mounted) return;
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ScreeningScreen(
@@ -49,6 +84,94 @@ class _ConsentScreenState extends State<ConsentScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _openNextAssessment(ScreeningModel latest) async {
+    final delaySummary = buildDelaySummaryFromResponses(
+      latest.domainResponses,
+      ageMonths: latest.ageMonths,
+    );
+    if (!mounted) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => BehavioralPsychosocialScreen(
+          prevDomainScores: latest.domainScores,
+          domainRiskLevels: null,
+          delaySummary: delaySummary,
+          overallRisk: latest.overallRisk.toString().split('.').last,
+          missedMilestones: latest.missedMilestones,
+          explainability: latest.explainability,
+          childId: widget.childId,
+          awwId: widget.awwId,
+          ageMonths: widget.ageMonths,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showRetakeOrMoveNextDialog(ScreeningModel latest) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Development Assessment Completed'),
+          content: const Text(
+            'Choose an action: retake this assessment or move to the next assessment.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                _openDevelopmentAssessment();
+              },
+              child: const Text('Retake Assessment'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                _openNextAssessment(latest);
+              },
+              child: const Text('Move to Next Assessment'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _continue() async {
+    if (!consentGiven) return;
+    await _localDb.initialize();
+    final child = _localDb.getChild(widget.childId);
+    final previous = _localDb
+        .getChildScreenings(widget.childId)
+        .where((s) {
+          final hasAllDomains =
+              s.domainResponses.containsKey('GM') &&
+              s.domainResponses.containsKey('FM') &&
+              s.domainResponses.containsKey('LC') &&
+              s.domainResponses.containsKey('COG') &&
+              s.domainResponses.containsKey('SE');
+          if (!hasAllDomains) {
+            return false;
+          }
+          if (!_awcCodesMatch(s.awwId, widget.awwId)) {
+            return false;
+          }
+          if (child != null && s.screeningDate.isBefore(child.createdAt)) {
+            return false;
+          }
+          return true;
+        })
+        .toList();
+    if (!mounted) return;
+    if (previous.isNotEmpty) {
+      await _showRetakeOrMoveNextDialog(previous.first);
+      return;
+    }
+    await _openDevelopmentAssessment();
   }
 
   Future<void> _goDashboard() async {

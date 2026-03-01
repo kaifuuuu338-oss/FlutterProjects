@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:my_first_app/core/localization/app_localizations.dart';
+import 'package:my_first_app/core/utils/baseline_risk_scoring.dart';
 
 class BaselineRiskScoreScreen extends StatelessWidget {
   final String autismRisk;
@@ -22,18 +23,12 @@ class BaselineRiskScoreScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final gm = delaySummary?['GM_delay'] ?? 0;
-    final fm = delaySummary?['FM_delay'] ?? 0;
-    final lc = delaySummary?['LC_delay'] ?? 0;
-    final cog = delaySummary?['COG_delay'] ?? 0;
-    final se = delaySummary?['SE_delay'] ?? 0;
-    final total = delaySummary?['num_delays'] ?? (gm + fm + lc + cog + se);
-    final delayPoints = total * 5;
-    final autismBonus = _riskBonus(autismRisk, high: 15, moderate: 8);
-    final adhdBonus = _riskBonus(adhdRisk, high: 8, moderate: 4);
-    final behaviorBonus = _riskBonus(behaviorRisk, high: 7, moderate: 0);
-    final baselineScore = delayPoints + autismBonus + adhdBonus + behaviorBonus;
-    final baselineCategory = _baselineCategory(baselineScore);
+    final baseline = calculateBaselineRisk(
+      autismRisk: autismRisk,
+      adhdRisk: adhdRisk,
+      behaviorRisk: behaviorRisk,
+      delaySummary: delaySummary,
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -52,9 +47,9 @@ class BaselineRiskScoreScreen extends StatelessWidget {
           _card(
             child: Row(
               children: [
-                Expanded(child: _metric(l10n.t('baseline_score_label'), '$baselineScore')),
+                Expanded(child: _metric(l10n.t('baseline_score_label'), '${baseline.score}')),
                 const SizedBox(width: 12),
-                Expanded(child: _metric(l10n.t('baseline_category_label'), baselineCategory)),
+                Expanded(child: _metric(l10n.t('baseline_category_label'), baseline.category)),
               ],
             ),
           ),
@@ -64,10 +59,10 @@ class BaselineRiskScoreScreen extends StatelessWidget {
               spacing: 10,
               runSpacing: 8,
               children: [
-                _chip('Delays: $total x 5 = $delayPoints'),
-                _chip('Autism: +$autismBonus'),
-                _chip('ADHD: +$adhdBonus'),
-                _chip('Behavior: +$behaviorBonus'),
+                _chip('Delays: ${baseline.totalDelays} x 5 = ${baseline.delayPoints}'),
+                _chip('Autism: +${baseline.autismPoints}'),
+                _chip('ADHD: +${baseline.adhdPoints}'),
+                _chip('Behavior: +${baseline.behaviorPoints}'),
               ],
             ),
           ),
@@ -95,12 +90,12 @@ class BaselineRiskScoreScreen extends StatelessWidget {
               ],
               rows: [
                 DataRow(cells: [
-                  DataCell(Text('$gm')),
-                  DataCell(Text('$fm')),
-                  DataCell(Text('$lc')),
-                  DataCell(Text('$cog')),
-                  DataCell(Text('$se')),
-                  DataCell(Text('$total')),
+                  DataCell(Text('${baseline.gmDelay}')),
+                  DataCell(Text('${baseline.fmDelay}')),
+                  DataCell(Text('${baseline.lcDelay}')),
+                  DataCell(Text('${baseline.cogDelay}')),
+                  DataCell(Text('${baseline.seDelay}')),
+                  DataCell(Text('${baseline.totalDelays}')),
                 ]),
               ],
             ),
@@ -157,16 +152,4 @@ class BaselineRiskScoreScreen extends StatelessWidget {
     );
   }
 
-  int _riskBonus(String risk, {required int high, required int moderate}) {
-    final r = risk.trim().toLowerCase();
-    if (r == 'high' || r == 'critical') return high;
-    if (r == 'moderate' || r == 'medium') return moderate;
-    return 0;
-  }
-
-  String _baselineCategory(int score) {
-    if (score <= 10) return 'Low';
-    if (score <= 25) return 'Medium';
-    return 'High';
-  }
 }

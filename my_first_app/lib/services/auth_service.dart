@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:my_first_app/core/navigation/navigation_state_service.dart';
 import 'package:my_first_app/models/aww_model.dart';
 import 'package:my_first_app/services/local_db_service.dart';
 import 'package:my_first_app/core/constants/app_constants.dart';
@@ -188,6 +189,7 @@ class AuthService {
       await _storage.delete(key: _refreshTokenKey);
       await _storage.delete(key: _userDataKey);
       await _storage.delete(key: _awcCodeKey);
+      await NavigationStateService.instance.clearState();
     } catch (e) {
       print('Logout error: $e');
     }

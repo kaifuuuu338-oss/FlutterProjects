@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:my_first_app/core/constants/app_constants.dart';
 import 'package:my_first_app/core/localization/app_localizations.dart';
+import 'package:my_first_app/core/navigation/navigation_state_service.dart';
 import 'package:my_first_app/models/child_model.dart';
 import 'package:my_first_app/models/screening_model.dart';
 import 'package:my_first_app/screens/consent_screen.dart';
 import 'package:my_first_app/screens/dashboard_screen.dart';
+import 'package:my_first_app/screens/registered_children_screen.dart';
 import 'package:my_first_app/screens/result_screen.dart';
 import 'package:my_first_app/screens/settings_screen.dart';
 import 'package:my_first_app/services/api_service.dart';
@@ -36,7 +38,7 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
   final TextEditingController _dobController = TextEditingController();
 
   DateTime? _dob;
-  final String _gender = 'M';
+  String _gender = 'M';
   String _assessmentCycle = 'Baseline';
   String? _district;
   String? _mandal;
@@ -46,6 +48,9 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
   @override
   void initState() {
     super.initState();
+    NavigationStateService.instance.saveState(
+      screen: NavigationStateService.screenChildRegistration,
+    );
     _loadLoggedInUserData();
   }
 
@@ -359,27 +364,24 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
       return;
     }
 
-    // Check for duplicate registration
+    // Check duplicate child_id within the same AWC.
     final awcCode = _awcCodeController.text.trim();
+    final childId = _childIdController.text.trim();
     try {
       final existingChildren = await _api.getRegisteredChildren(awcCode: awcCode);
-      
-      // Check if a child with same district, mandal, and awc_code already exists
+
+      // Do not block by district/mandal/AWC combination; that is valid for many children.
       final isDuplicate = existingChildren.any((child) {
-        final childDistrict = child['district']?.toString().trim() ?? '';
-        final childMandal = child['mandal']?.toString().trim() ?? '';
-        final childAwcCode = child['awc_code']?.toString().trim().toUpperCase() ?? '';
-        
-        return childDistrict.toLowerCase() == _district!.toLowerCase() &&
-               childMandal.toLowerCase() == _mandal!.toLowerCase() &&
-               childAwcCode == awcCode.toUpperCase();
+        final existingChildId =
+            child['child_id']?.toString().trim().toLowerCase() ?? '';
+        return existingChildId == childId.toLowerCase();
       });
 
       if (isDuplicate) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('USER already exist'),
+            content: const Text('Child already registered'),
             backgroundColor: Colors.orange,
           ),
         );
@@ -403,7 +405,8 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
       parentMobile: '',
       aadhaar: null,
       address: null,
-      awwId: 'demo_aww_001',
+      // Keep AWW context aligned with the selected AWC for downstream submits.
+      awwId: _awcCodeController.text.trim().toUpperCase(),
       createdAt: DateTime.now(),
       updatedAt: DateTime.now(),
     );
@@ -452,40 +455,10 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
   }
 
   Future<void> _viewRegisteredChildren() async {
-    await _localDb.initialize();
-    final children = _localDb.getAllChildren();
     if (!mounted) return;
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(AppLocalizations.of(context).t('registered_children')),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: children.isEmpty
-              ? Text(AppLocalizations.of(context).t('no_children_registered'))
-              : ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: children.length,
-                  itemBuilder: (context, index) {
-                    final c = children[index];
-                    final genderLabel = c.gender == 'M'
-                        ? AppLocalizations.of(context).t('gender_male')
-                        : AppLocalizations.of(context).t('gender_female');
-                    return ListTile(
-                      title: Text(c.childId),
-                      subtitle: Text(
-                        '${AppLocalizations.of(context).t('age_with_months', {'age': '${c.ageMonths}'})} | $genderLabel',
-                      ),
-                    );
-                  },
-                ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text(AppLocalizations.of(context).t('close')),
-          ),
-        ],
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const RegisteredChildrenScreen(),
       ),
     );
   }
@@ -755,6 +728,36 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                           ).t('age_with_months', {'age': '$_ageMonths'}),
                           style: TextStyle(color: Colors.grey[700]),
                         ),
+                      const SizedBox(height: 12),
+
+                      DropdownButtonFormField<String>(
+                        initialValue: _gender,
+                        items: [
+                          DropdownMenuItem<String>(
+                            value: 'M',
+                            child: Text(
+                              AppLocalizations.of(context).t('gender_male'),
+                            ),
+                          ),
+                          DropdownMenuItem<String>(
+                            value: 'F',
+                            child: Text(
+                              AppLocalizations.of(context).t('gender_female'),
+                            ),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          if (value == null) return;
+                          setState(() => _gender = value);
+                        },
+                        decoration: InputDecoration(
+                          labelText: AppLocalizations.of(context).t('gender'),
+                          prefixIcon: const Icon(Icons.wc_outlined),
+                        ),
+                        validator: (v) => (v == null || v.trim().isEmpty)
+                            ? AppLocalizations.of(context).t('gender')
+                            : null,
+                      ),
                       const SizedBox(height: 12),
 
                       TextFormField(

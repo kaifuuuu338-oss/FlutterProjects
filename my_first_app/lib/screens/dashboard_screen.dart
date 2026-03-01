@@ -3,17 +3,15 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:my_first_app/core/localization/app_localizations.dart';
 import 'package:my_first_app/core/navigation/app_route_observer.dart';
+import 'package:my_first_app/core/navigation/navigation_state_service.dart';
 import 'package:my_first_app/models/child_model.dart';
 import 'package:my_first_app/models/screening_model.dart';
-import 'package:my_first_app/models/referral_model.dart';
 import 'package:my_first_app/screens/child_registration_screen.dart';
 import 'package:my_first_app/screens/consent_screen.dart';
 import 'package:my_first_app/screens/district_monitor_screen.dart';
 import 'package:my_first_app/screens/login_screen.dart';
-import 'package:my_first_app/screens/referral_batch_summary_screen.dart';
-import 'package:my_first_app/screens/referral_details_screen.dart';
+import 'package:my_first_app/screens/registered_children_screen.dart';
 import 'package:my_first_app/screens/result_screen.dart';
-import 'package:my_first_app/screens/behavioral_psychosocial_screen.dart';
 import 'package:my_first_app/screens/awc_intervention_monitor_screen.dart';
 import 'package:my_first_app/screens/settings_screen.dart';
 import 'package:my_first_app/screens/behavioral_psychosocial_summary_screen.dart';
@@ -61,8 +59,6 @@ class _DashboardScreenState extends State<DashboardScreen> with RouteAware {
           autismRisk: 'low',
           adhdRisk: 'low',
           behaviorRisk: 'low',
-          baselineScore: 0,
-          baselineCategory: 'Low',
           immunizationStatus: 'full',
           weightKg: 0,
           heightCm: 0,
@@ -102,6 +98,9 @@ class _DashboardScreenState extends State<DashboardScreen> with RouteAware {
   @override
   void initState() {
     super.initState();
+    NavigationStateService.instance.saveState(
+      screen: NavigationStateService.screenDashboard,
+    );
     _loadStats();
     _startStatsAutoRefresh();
   }
@@ -339,96 +338,87 @@ class _DashboardScreenState extends State<DashboardScreen> with RouteAware {
   }
 
   Future<void> _viewRegisteredChildren() async {
-    await _localDb.initialize();
-    final savedAwcCode = _loggedInAwcCode.isNotEmpty
-        ? _loggedInAwcCode
-        : (await _authService.getLoggedInAwcCode() ?? '').trim().toUpperCase();
-    List<Map<String, dynamic>> backendChildren = const <Map<String, dynamic>>[];
-    var loadedFromBackend = false;
-    try {
-      backendChildren = await _api.getRegisteredChildren(
-        limit: 1000,
-        awcCode: savedAwcCode.isEmpty ? null : savedAwcCode,
-      );
-      loadedFromBackend = true;
-    } catch (_) {
-      loadedFromBackend = false;
-    }
-    final children = _localDb
-        .getAllChildren()
-        .where(
-          (c) =>
-              savedAwcCode.isEmpty ||
-              _awcCodesMatch(c.awcCode, savedAwcCode),
-        )
-        .toList();
     if (!mounted) return;
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(AppLocalizations.of(context).t('registered_children')),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: (loadedFromBackend ? backendChildren.isEmpty : children.isEmpty)
-              ? Text(AppLocalizations.of(context).t('no_children_registered'))
-              : ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: loadedFromBackend
-                      ? backendChildren.length
-                      : children.length,
-                  itemBuilder: (context, index) {
-                    if (loadedFromBackend) {
-                      final row = backendChildren[index];
-                      final childId = (row['child_id'] ?? '').toString().trim();
-                      final childName =
-                          (row['child_name'] ?? '').toString().trim();
-                      final ageRaw = row['age_months'];
-                      final ageMonths = ageRaw is num
-                          ? ageRaw.toInt()
-                          : int.tryParse('${ageRaw ?? ''}') ?? 0;
-                      final genderRaw =
-                          (row['gender'] ?? '').toString().trim().toUpperCase();
-                      final genderLabel = genderRaw.startsWith('M')
-                          ? AppLocalizations.of(context).t('gender_male')
-                          : genderRaw.startsWith('F')
-                              ? AppLocalizations.of(context).t('gender_female')
-                              : (row['gender']?.toString().trim().isNotEmpty ??
-                                        false)
-                                  ? row['gender'].toString().trim()
-                                  : '-';
-                      return ListTile(
-                        title: Text(
-                          childId.isNotEmpty
-                              ? childId
-                              : (childName.isNotEmpty ? childName : 'Unknown'),
-                        ),
-                        subtitle: Text(
-                          '${AppLocalizations.of(context).t('age_with_months', {'age': '$ageMonths'})} | $genderLabel',
-                        ),
-                      );
-                    }
-                    final c = children[index];
-                    final genderLabel = c.gender == 'M' ? AppLocalizations.of(context).t('gender_male') : AppLocalizations.of(context).t('gender_female');
-                    return ListTile(
-                      title: Text(c.childId),
-                      subtitle: Text('${AppLocalizations.of(context).t('age_with_months', {'age': '${c.ageMonths}'})} | $genderLabel'),
-                    );
-                  },
-                ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text(AppLocalizations.of(context).t('close')),
-          ),
-        ],
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const RegisteredChildrenScreen(),
       ),
     );
   }
 
   Future<void> _startScreening() async {
     await _localDb.initialize();
-    final children = _localDb.getAllChildren();
+    final savedAwcCode = _loggedInAwcCode.isNotEmpty
+        ? _loggedInAwcCode
+        : (await _authService.getLoggedInAwcCode() ?? '').trim().toUpperCase();
+    final localChildren = _localDb
+        .getAllChildren()
+        .where(
+          (c) =>
+              savedAwcCode.isEmpty || _awcCodesMatch(c.awcCode, savedAwcCode),
+        )
+        .toList();
+    final localChildById = <String, ChildModel>{
+      for (final c in localChildren) c.childId: c,
+    };
+    List<Map<String, dynamic>> backendChildren = const <Map<String, dynamic>>[];
+    try {
+      backendChildren = await _api.getRegisteredChildren(
+        limit: 1000,
+        awcCode: savedAwcCode.isEmpty ? null : savedAwcCode,
+      );
+    } catch (_) {
+      backendChildren = const <Map<String, dynamic>>[];
+    }
+    final childRowsById = <String, Map<String, dynamic>>{};
+    for (final child in localChildren) {
+      childRowsById[child.childId] = <String, dynamic>{
+        'child_id': child.childId,
+        'age_months': child.ageMonths,
+        'aww_id': child.awwId.isNotEmpty ? child.awwId : child.awcCode,
+        'has_screening': false,
+      };
+    }
+    bool boolValue(dynamic value) {
+      if (value is bool) return value;
+      if (value is num) return value != 0;
+      final raw = (value ?? '').toString().trim().toLowerCase();
+      return raw == 'true' || raw == '1' || raw == 'yes';
+    }
+    for (final row in backendChildren) {
+      final childId = (row['child_id'] ?? '').toString().trim();
+      if (childId.isEmpty) continue;
+      final ageRaw = row['age_months'];
+      final ageMonths = ageRaw is num
+          ? ageRaw.toInt()
+          : int.tryParse('${ageRaw ?? ''}') ?? 0;
+      final awcCode = (row['awc_code'] ?? '').toString().trim();
+      final hasScreening = boolValue(row['has_screening']);
+      final existing = childRowsById[childId];
+      if (existing == null) {
+        childRowsById[childId] = <String, dynamic>{
+          'child_id': childId,
+          'age_months': ageMonths,
+          'aww_id': awcCode.isNotEmpty ? awcCode : savedAwcCode,
+          'has_screening': hasScreening,
+        };
+      } else {
+        final currentAge = existing['age_months'] is num
+            ? (existing['age_months'] as num).toInt()
+            : int.tryParse('${existing['age_months'] ?? ''}') ?? 0;
+        if (currentAge <= 0 && ageMonths > 0) {
+          existing['age_months'] = ageMonths;
+        }
+        final currentAww = (existing['aww_id'] ?? '').toString().trim();
+        if (currentAww.isEmpty && awcCode.isNotEmpty) {
+          existing['aww_id'] = awcCode;
+        }
+        if (hasScreening) {
+          existing['has_screening'] = true;
+        }
+      }
+    }
+    final children = childRowsById.values.toList();
     if (!mounted) return;
     if (children.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -437,77 +427,150 @@ class _DashboardScreenState extends State<DashboardScreen> with RouteAware {
       return;
     }
 
+    bool hasDevelopmentAssessment(
+      String childId, {
+      String? awwId,
+      DateTime? notBefore,
+    }) {
+      final screenings = _localDb.getChildScreenings(childId);
+      final normalizedAwwId = (awwId ?? '').trim();
+      return screenings.any(
+        (s) {
+          final hasAllDomains =
+              s.domainResponses.containsKey('GM') &&
+            s.domainResponses.containsKey('FM') &&
+            s.domainResponses.containsKey('LC') &&
+            s.domainResponses.containsKey('COG') &&
+            s.domainResponses.containsKey('SE');
+          if (!hasAllDomains) {
+            return false;
+          }
+          final hasMatchingAww = normalizedAwwId.isEmpty
+              ? true
+              : _awcCodesMatch(s.awwId, normalizedAwwId);
+          if (!hasMatchingAww) {
+            return false;
+          }
+          if (notBefore != null && s.screeningDate.isBefore(notBefore)) {
+            return false;
+          }
+          return true;
+        },
+      );
+    }
+
+    final statusByChildId = <String, bool>{
+      for (final c in children)
+        (c['child_id'] ?? '').toString().trim(): (() {
+          final cid = (c['child_id'] ?? '').toString().trim();
+          final rowAwwId = (c['aww_id'] ?? '').toString().trim();
+          final localChild = localChildById[cid];
+          final localDone = hasDevelopmentAssessment(
+            cid,
+            awwId: localChild?.awcCode ?? rowAwwId,
+            notBefore: localChild?.createdAt,
+          );
+          final backendDone = boolValue(c['has_screening']);
+          return localDone || backendDone;
+        })(),
+    };
+    final orderedChildren = [...children]
+      ..sort((a, b) {
+        final aId = (a['child_id'] ?? '').toString().trim();
+        final bId = (b['child_id'] ?? '').toString().trim();
+        final aSubmitted = statusByChildId[aId] ?? false;
+        final bSubmitted = statusByChildId[bId] ?? false;
+        if (aSubmitted == bSubmitted) {
+          return aId.compareTo(bId);
+        }
+        // Show pending children first.
+        return aSubmitted ? 1 : -1;
+      });
+
     showModalBottomSheet(
       context: context,
-      builder: (_) => ListView.builder(
-        itemCount: children.length,
-        itemBuilder: (context, index) {
-          final child = children[index];
-          return ListTile(
-            title: Text(child.childId),
-            subtitle: Text(AppLocalizations.of(context).t('age_with_months', {'age': '${child.ageMonths}'})),
-            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-            onTap: () {
-              Navigator.of(context).pop();
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => ConsentScreen(
-                    childId: child.childId,
-                    ageMonths: child.ageMonths,
-                    awwId: child.awwId,
+      builder: (sheetContext) => SafeArea(
+        child: ListView.builder(
+          itemCount: orderedChildren.length,
+          itemBuilder: (itemContext, index) {
+            final child = orderedChildren[index];
+            final childId = (child['child_id'] ?? '').toString().trim();
+            final ageRaw = child['age_months'];
+            final ageMonths = ageRaw is num
+                ? ageRaw.toInt()
+                : int.tryParse('${ageRaw ?? ''}') ?? 0;
+            final awwId = (child['aww_id'] ?? '').toString().trim();
+            final isSubmitted = statusByChildId[childId] ?? false;
+            final statusText = isSubmitted
+                ? 'Assessment submitted'
+                : 'Assessment not done';
+            final statusColor = isSubmitted
+                ? const Color(0xFF2E7D32)
+                : const Color(0xFFE65100);
+
+            return ListTile(
+              title: Text(childId),
+              subtitle: Text(
+                '${AppLocalizations.of(context).t('age_with_months', {'age': '$ageMonths'})} | $statusText',
+              ),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: statusColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      isSubmitted ? 'Submitted' : 'Pending',
+                      style: TextStyle(
+                        color: statusColor,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 11,
+                      ),
+                    ),
                   ),
-                ),
-              );
-            },
-          );
-        },
+                  if (!isSubmitted) ...[
+                    const SizedBox(width: 8),
+                    const Icon(Icons.arrow_forward_ios, size: 16),
+                  ],
+                ],
+              ),
+              onTap: () {
+                if (isSubmitted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Assessment submitted')),
+                  );
+                  return;
+                }
+                Navigator.of(sheetContext).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => ConsentScreen(
+                      childId: childId,
+                      ageMonths: ageMonths,
+                      awwId: savedAwcCode.isNotEmpty
+                          ? savedAwcCode
+                          : (awwId.isNotEmpty ? awwId : savedAwcCode),
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        ),
       ),
     );
   }
 
   Future<void> _startBehaviouralPsychosocial() async {
-    await _localDb.initialize();
-    final children = _localDb.getAllChildren();
-    if (!mounted) return;
-    if (children.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppLocalizations.of(context).t('please_register_child_first'))),
-      );
-      return;
-    }
-
-    showModalBottomSheet(
-      context: context,
-      builder: (_) => ListView.builder(
-        itemCount: children.length,
-        itemBuilder: (context, index) {
-          final child = children[index];
-          return ListTile(
-            title: Text(child.childId),
-            subtitle: Text(AppLocalizations.of(context).t('age_with_months', {'age': '${child.ageMonths}'})),
-            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-            onTap: () {
-              Navigator.of(context).pop();
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => BehavioralPsychosocialScreen(
-                    prevDomainScores: {},
-                    domainRiskLevels: null,
-                    delaySummary: null,
-                    overallRisk: 'low',
-                    missedMilestones: 0,
-                    explainability: '',
-                    childId: child.childId,
-                    awwId: child.awwId,
-                    ageMonths: child.ageMonths,
-                  ),
-                ),
-              );
-            },
-          );
-        },
-      ),
-    );
+    // Enforce canonical flow: Developmental screening must happen before
+    // neuro-behavioral assessment so developmental_risk_score is always saved.
+    await _startScreening();
   }
 
   Future<void> _viewPastResults() async {
@@ -563,129 +626,6 @@ class _DashboardScreenState extends State<DashboardScreen> with RouteAware {
         },
       ),
     );
-  }
-
-  Future<void> _openReferralBatchSummary() async {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => const ReferralBatchSummaryScreen(),
-      ),
-    );
-  }
-
-  // ignore: unused_element
-  Future<void> _openReferralSummary() async {
-    await _localDb.initialize();
-    final referrals = _localDb.getAllReferrals();
-    if (!mounted) return;
-    if (referrals.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppLocalizations.of(context).t('no_past_results'))),
-      );
-      return;
-    }
-
-    showModalBottomSheet(
-      context: context,
-      builder: (_) => ListView.builder(
-        itemCount: referrals.length,
-        itemBuilder: (context, index) {
-          final r = referrals[index];
-          final meta = r.metadata ?? {};
-          final domainKey = meta['domain'] as String?;
-          final domainRisk = (meta['domain_risk'] as String?) ?? (meta['risk_level'] as String?);
-          final referralTypeLabel = (meta['referral_type_label'] as String?) ?? r.referralType.toString().split('.').last;
-          final overallRisk = (meta['risk_level'] as String?) ?? (meta['overall_risk'] as String?) ?? 'low';
-          final ageMonthsValue = meta['age_months'];
-          final ageMonths = ageMonthsValue is int ? ageMonthsValue : int.tryParse(ageMonthsValue?.toString() ?? '') ?? 0;
-          final reasons = <String>[];
-          final domainReason = meta['domain_reason'] as String?;
-          if (domainReason != null && domainReason.isNotEmpty) {
-            reasons.add(domainReason);
-          } else if (domainKey != null && domainKey.isNotEmpty) {
-            final domainLabel = _domainLabel(domainKey);
-            if (domainRisk != null && domainRisk.isNotEmpty) {
-              reasons.add('$domainLabel (${_riskLabel(domainRisk)})');
-            } else {
-              reasons.add(domainLabel);
-            }
-          }
-
-          return ListTile(
-            title: Text('${r.childId} • $referralTypeLabel'),
-            subtitle: Text(AppLocalizations.of(context).t('date_label', {'date': r.createdAt.toLocal().toString()})),
-            trailing: const Icon(Icons.open_in_new),
-            onTap: () {
-              Navigator.of(context).pop();
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => ReferralDetailsScreen(
-                    referralId: r.referralId,
-                    childId: r.childId,
-                    awwId: r.awwId,
-                    ageMonths: ageMonths,
-                    overallRisk: overallRisk,
-                    referralType: referralTypeLabel,
-                    urgency: _urgencyLabel(r.urgency),
-                    status: r.status.toString().split('.').last,
-                    createdAt: r.createdAt,
-                    expectedFollowUpDate: r.expectedFollowUpDate,
-                    notes: r.notes,
-                    reasons: reasons,
-                  ),
-                ),
-              );
-            },
-          );
-        },
-      ),
-    );
-  }
-
-  String _domainLabel(String key) {
-    final l10n = AppLocalizations.of(context);
-    switch (key) {
-      case 'GM':
-        return l10n.t('domain_gm');
-      case 'FM':
-        return l10n.t('domain_fm');
-      case 'LC':
-        return l10n.t('domain_lc');
-      case 'COG':
-        return l10n.t('domain_cog');
-      case 'SE':
-        return l10n.t('domain_se');
-      default:
-        return key;
-    }
-  }
-
-  String _riskLabel(String riskKey) {
-    final l10n = AppLocalizations.of(context);
-    switch (riskKey.trim().toLowerCase()) {
-      case 'critical':
-        return l10n.t('critical');
-      case 'high':
-        return l10n.t('high');
-      case 'medium':
-        return l10n.t('medium');
-      case 'low':
-        return l10n.t('low');
-      default:
-        return riskKey;
-    }
-  }
-
-  String _urgencyLabel(ReferralUrgency urgency) {
-    final l10n = AppLocalizations.of(context);
-    switch (urgency) {
-      case ReferralUrgency.immediate:
-        return l10n.t('urgency_immediate');
-      case ReferralUrgency.priority:
-        return l10n.t('urgency_urgent');
-      default:
-        return l10n.t('urgency_normal');
-    }
   }
 
   Future<void> _showRiskStatus() async {
@@ -875,7 +815,6 @@ class _DashboardScreenState extends State<DashboardScreen> with RouteAware {
                     _actionTile(color: const Color(0xFF8E6CF6), icon: Icons.psychology, label: AppLocalizations.of(context).t('behavioural_psychosocial_shortcut'), onTap: _startBehaviouralPsychosocial, s: s),
                     _actionTile(color: const Color(0xFF1E88E5), icon: Icons.assessment, label: 'Behavior Summary', onTap: _openBehavioralSummaryShortcut, s: s),
                     _actionTile(color: const Color(0xFFF35A52), icon: Icons.show_chart, label: AppLocalizations.of(context).t('view_past_results'), onTap: _viewPastResults, s: s),
-                    _actionTile(color: const Color(0xFF26A69A), icon: Icons.assignment_turned_in, label: AppLocalizations.of(context).t('referral_batch_summary_shortcut'), onTap: _openReferralBatchSummary, s: s),
                     _actionTile(color: const Color(0xFF5E35B1), icon: Icons.monitor_heart, label: 'AWC Monitor', onTap: _openAwcMonitor, s: s),
                     _actionTile(color: const Color(0xFF3949AB), icon: Icons.map, label: 'Mandal/District View', onTap: _openDistrictMonitor, s: s),
                     if (!isWide)

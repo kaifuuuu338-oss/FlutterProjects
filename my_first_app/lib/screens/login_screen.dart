@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:my_first_app/core/navigation/navigation_state_service.dart';
 import 'package:my_first_app/core/localization/app_localizations.dart';
 import 'package:my_first_app/screens/dashboard_screen.dart';
 import 'package:my_first_app/services/api_service.dart';
@@ -29,6 +30,14 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _loading = false;
   bool _obscurePassword = true;
   bool _rememberMe = false;
+
+  @override
+  void initState() {
+    super.initState();
+    NavigationStateService.instance.saveState(
+      screen: NavigationStateService.screenLogin,
+    );
+  }
 
   @override
   void dispose() {

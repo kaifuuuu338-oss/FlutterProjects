@@ -3,7 +3,7 @@ from __future__ import annotations
 import glob
 import os
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import joblib
 import pandas as pd
@@ -17,6 +17,22 @@ class LoadedArtifacts:
     feature_columns: List[str]
     categorical_columns: List[str]
     numeric_columns: List[str]
+
+
+@dataclass
+class LoadedDomainModels:
+    models: Dict[str, Any]
+    feature_order: Dict[str, List[str]]
+
+
+@dataclass
+class LoadedNeuroBehaviorModels:
+    models: Dict[str, Any]
+    feature_order: Dict[str, List[str]]
+
+
+DOMAIN_KEYS = ["GM", "FM", "LC", "COG", "SE"]
+NEURO_DOMAIN_KEYS = ["BPS_AUT", "BPS_ADHD", "BPS_BEH"]
 
 
 def _find_latest(pattern: str) -> str:
@@ -58,8 +74,300 @@ def load_artifacts(base_dir: str) -> LoadedArtifacts:
     )
 
 
+def _candidate_domain_model_dirs(explicit_dir: Optional[str] = None) -> List[str]:
+    here = os.path.dirname(__file__)
+    candidates = []
+    if explicit_dir:
+        candidates.append(explicit_dir)
+    candidates.extend(
+        [
+            os.path.join(here, "..", "model_assets", "domain_models"),
+            os.path.join(here, "..", "model_assets", "model", "domain_models"),
+            os.path.join(os.path.expanduser("~"), "Downloads"),
+        ]
+    )
+
+    unique = []
+    seen = set()
+    for item in candidates:
+        path = os.path.abspath(item)
+        if path in seen:
+            continue
+        seen.add(path)
+        unique.append(path)
+    return unique
+
+
+def load_domain_models(base_dir: Optional[str] = None) -> LoadedDomainModels:
+    expected_files = {domain: f"domain_{domain}.pkl" for domain in DOMAIN_KEYS}
+    selected_dir = None
+
+    for candidate in _candidate_domain_model_dirs(base_dir):
+        if all(os.path.exists(os.path.join(candidate, fname)) for fname in expected_files.values()):
+            selected_dir = candidate
+            break
+
+    if selected_dir is None:
+        searched = ", ".join(_candidate_domain_model_dirs(base_dir))
+        raise FileNotFoundError(
+            f"Missing domain model files ({', '.join(expected_files.values())}). "
+            f"Searched: {searched}"
+        )
+
+    models: Dict[str, Any] = {}
+    feature_order: Dict[str, List[str]] = {}
+    for domain, file_name in expected_files.items():
+        path = os.path.join(selected_dir, file_name)
+        model = joblib.load(path)
+        if not hasattr(model, "predict"):
+            raise ValueError(f"domain model {path} does not support predict()")
+        models[domain] = model
+        if hasattr(model, "feature_names_in_"):
+            feature_order[domain] = [str(x) for x in list(model.feature_names_in_)]
+        else:
+            n_features = int(getattr(model, "n_features_in_", 15))
+            feature_order[domain] = [f"Q{i + 1}" for i in range(n_features)]
+
+    return LoadedDomainModels(models=models, feature_order=feature_order)
+
+
+def _candidate_neuro_model_dirs(explicit_dir: Optional[str] = None) -> List[str]:
+    here = os.path.dirname(__file__)
+    candidates = []
+    if explicit_dir:
+        candidates.append(explicit_dir)
+    candidates.extend(
+        [
+            os.path.join(here, "..", "model_assets", "neuro_behavioral_models"),
+            os.path.join(here, "..", "model_assets", "model", "neuro_behavioral_models"),
+            os.path.join(os.path.expanduser("~"), "Downloads"),
+        ]
+    )
+
+    unique = []
+    seen = set()
+    for item in candidates:
+        path = os.path.abspath(item)
+        if path in seen:
+            continue
+        seen.add(path)
+        unique.append(path)
+    return unique
+
+
+def load_neuro_behavior_models(base_dir: Optional[str] = None) -> LoadedNeuroBehaviorModels:
+    expected_files = {
+        "BPS_AUT": "neuro_autism_delay_model.pkl",
+        "BPS_ADHD": "neuro_adhd_delay_model.pkl",
+        "BPS_BEH": "neuro_behavior_delay_model.pkl",
+    }
+    selected_dir = None
+
+    for candidate in _candidate_neuro_model_dirs(base_dir):
+        if all(os.path.exists(os.path.join(candidate, fname)) for fname in expected_files.values()):
+            selected_dir = candidate
+            break
+
+    if selected_dir is None:
+        searched = ", ".join(_candidate_neuro_model_dirs(base_dir))
+        raise FileNotFoundError(
+            f"Missing neuro behavioral model files ({', '.join(expected_files.values())}). "
+            f"Searched: {searched}"
+        )
+
+    models: Dict[str, Any] = {}
+    feature_order: Dict[str, List[str]] = {}
+    for domain, file_name in expected_files.items():
+        path = os.path.join(selected_dir, file_name)
+        model = joblib.load(path)
+        if not hasattr(model, "predict"):
+            raise ValueError(f"neuro model {path} does not support predict()")
+        models[domain] = model
+        if hasattr(model, "feature_names_in_"):
+            feature_order[domain] = [str(x) for x in list(model.feature_names_in_)]
+        else:
+            n_features = int(getattr(model, "n_features_in_", 15))
+            feature_order[domain] = [f"GM_Q{i + 1}" for i in range(n_features)]
+
+    return LoadedNeuroBehaviorModels(models=models, feature_order=feature_order)
+
+
 def _delay_count(values: List[int]) -> int:
     return sum(1 for v in values if int(v) == 0)
+
+
+def _normalize_binary_answers(values: List[int], target_len: int) -> List[int]:
+    # Pad missing responses as 1 ("yes / no delay signal") to avoid false positives.
+    normalized = [1] * max(target_len, 0)
+    limit = min(len(values), target_len)
+    for i in range(limit):
+        try:
+            normalized[i] = 1 if int(values[i]) != 0 else 0
+        except Exception:
+            normalized[i] = 0
+    return normalized
+
+
+def _delay_label_from_prob(delay_flag: int, delay_prob: float) -> str:
+    if delay_flag <= 0:
+        return "Low"
+    if delay_prob >= 0.90:
+        return "Critical"
+    if delay_prob >= 0.75:
+        return "High"
+    return "Medium"
+
+
+def _risk_rank(label: str) -> int:
+    return {
+        "low": 0,
+        "medium": 1,
+        "moderate": 1,
+        "high": 2,
+        "critical": 3,
+    }.get(str(label).strip().lower(), 0)
+
+
+def predict_domain_delays(payload: dict, domain_models: LoadedDomainModels) -> dict:
+    domain_responses = payload.get("domain_responses", {}) or {}
+
+    delay_summary: Dict[str, int] = {}
+    domain_scores: Dict[str, str] = {}
+    explanation: List[str] = []
+
+    for domain in DOMAIN_KEYS:
+        model = domain_models.models.get(domain)
+        feature_names = domain_models.feature_order.get(domain, [f"Q{i}" for i in range(1, 16)])
+        if model is None:
+            continue
+
+        raw_answers = domain_responses.get(domain, [])
+        if not isinstance(raw_answers, list):
+            raw_answers = []
+        raw_answer_count = len(raw_answers)
+        answers = _normalize_binary_answers(raw_answers, len(feature_names))
+        feature_frame = pd.DataFrame(
+            [{feature_names[i]: answers[i] for i in range(len(feature_names))}],
+            columns=feature_names,
+        )
+
+        pred_class = int(model.predict(feature_frame)[0])
+        classes = list(getattr(model, "classes_", [0, 1]))
+        delay_class = 1 if 1 in classes else int(classes[-1])
+        delay_flag = 1 if pred_class == delay_class else 0
+
+        delay_prob = float(delay_flag)
+        if hasattr(model, "predict_proba"):
+            probs = model.predict_proba(feature_frame)[0]
+            if delay_class in classes:
+                delay_prob = float(probs[classes.index(delay_class)])
+            elif len(probs) > 1:
+                delay_prob = float(probs[1])
+            elif len(probs) == 1:
+                delay_prob = float(probs[0])
+
+        domain_scores[domain] = _delay_label_from_prob(delay_flag, delay_prob)
+        delay_summary[f"{domain}_delay"] = delay_flag
+        explanation_text = (
+            f"{domain}: {'delay predicted' if delay_flag else 'no delay predicted'} "
+            f"(p={delay_prob:.2f})"
+        )
+        missing = max(len(feature_names) - raw_answer_count, 0)
+        if missing > 0:
+            explanation_text += f", padded {missing} missing responses"
+        explanation.append(explanation_text)
+
+    num_delays = sum(delay_summary.values())
+    delay_summary["num_delays"] = num_delays
+
+    if num_delays >= 4:
+        risk_level = "Critical"
+    elif num_delays >= 2:
+        risk_level = "High"
+    elif num_delays == 1:
+        risk_level = "Medium"
+    else:
+        risk_level = "Low"
+
+    if not explanation:
+        explanation.append("No domain model predictions available.")
+
+    return {
+        "risk_level": risk_level,
+        "domain_scores": domain_scores,
+        "explanation": explanation,
+        "delay_summary": delay_summary,
+        "model_source": "domain_models",
+    }
+
+
+def predict_neuro_behavioral_risks(payload: dict, neuro_models: LoadedNeuroBehaviorModels) -> dict:
+    domain_responses = payload.get("domain_responses", {}) or {}
+
+    delay_summary: Dict[str, int] = {}
+    domain_scores: Dict[str, str] = {}
+    explanation: List[str] = []
+
+    for domain in NEURO_DOMAIN_KEYS:
+        model = neuro_models.models.get(domain)
+        feature_names = neuro_models.feature_order.get(domain, [f"GM_Q{i + 1}" for i in range(15)])
+        if model is None:
+            continue
+
+        raw_answers = domain_responses.get(domain, [])
+        if not isinstance(raw_answers, list):
+            raw_answers = []
+        raw_answer_count = len(raw_answers)
+        answers = _normalize_binary_answers(raw_answers, len(feature_names))
+        feature_frame = pd.DataFrame(
+            [{feature_names[i]: answers[i] for i in range(len(feature_names))}],
+            columns=feature_names,
+        )
+
+        pred_class = int(model.predict(feature_frame)[0])
+        classes = list(getattr(model, "classes_", [0, 1]))
+        delay_class = 1 if 1 in classes else int(classes[-1])
+        delay_flag = 1 if pred_class == delay_class else 0
+
+        delay_prob = float(delay_flag)
+        if hasattr(model, "predict_proba"):
+            probs = model.predict_proba(feature_frame)[0]
+            if delay_class in classes:
+                delay_prob = float(probs[classes.index(delay_class)])
+            elif len(probs) > 1:
+                delay_prob = float(probs[1])
+            elif len(probs) == 1:
+                delay_prob = float(probs[0])
+
+        domain_scores[domain] = _delay_label_from_prob(delay_flag, delay_prob)
+        delay_summary[f"{domain}_delay"] = delay_flag
+        explanation_text = (
+            f"{domain}: {'delay predicted' if delay_flag else 'no delay predicted'} "
+            f"(p={delay_prob:.2f})"
+        )
+        missing = max(len(feature_names) - raw_answer_count, 0)
+        if missing > 0:
+            explanation_text += f", padded {missing} missing responses"
+        explanation.append(explanation_text)
+
+    num_delays = sum(delay_summary.values())
+    delay_summary["num_delays"] = num_delays
+
+    if domain_scores:
+        risk_level = max(domain_scores.values(), key=_risk_rank)
+    else:
+        risk_level = "Low"
+
+    if not explanation:
+        explanation.append("No neuro behavioral model predictions available.")
+
+    return {
+        "risk_level": risk_level,
+        "domain_scores": domain_scores,
+        "explanation": explanation,
+        "delay_summary": delay_summary,
+        "model_source": "neuro_behavioral_models",
+    }
 
 
 def _domain_level(values: List[int]) -> str:

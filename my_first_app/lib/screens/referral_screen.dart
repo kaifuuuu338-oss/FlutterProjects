@@ -4,6 +4,7 @@ import 'package:my_first_app/models/child_model.dart';
 import 'package:my_first_app/models/referral_model.dart';
 import 'package:my_first_app/models/screening_model.dart';
 import 'package:my_first_app/screens/dashboard_screen.dart';
+import 'package:my_first_app/screens/registered_children_screen.dart';
 import 'package:my_first_app/screens/referral_batch_summary_screen.dart';
 import 'package:my_first_app/screens/result_screen.dart';
 import 'package:my_first_app/screens/settings_screen.dart';
@@ -132,38 +133,10 @@ class _ReferralScreenState extends State<ReferralScreen> {
   }
 
   Future<void> _viewRegisteredChildren() async {
-    await _localDb.initialize();
-    final children = _localDb.getAllChildren();
     if (!mounted) return;
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(AppLocalizations.of(context).t('registered_children')),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: children.isEmpty
-              ? Text(AppLocalizations.of(context).t('no_children_registered'))
-              : ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: children.length,
-                  itemBuilder: (context, index) {
-                    final c = children[index];
-                    final genderLabel = c.gender == 'M'
-                        ? AppLocalizations.of(context).t('gender_male')
-                        : AppLocalizations.of(context).t('gender_female');
-                    return ListTile(
-                      title: Text(c.childId),
-                      subtitle: Text('${AppLocalizations.of(context).t('age_with_months', {'age': '${c.ageMonths}'})} | $genderLabel'),
-                    );
-                  },
-                ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text(AppLocalizations.of(context).t('close')),
-          ),
-        ],
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const RegisteredChildrenScreen(),
       ),
     );
   }

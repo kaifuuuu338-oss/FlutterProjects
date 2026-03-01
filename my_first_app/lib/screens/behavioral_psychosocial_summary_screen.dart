@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:my_first_app/core/localization/app_localizations.dart';
+import 'package:my_first_app/core/navigation/navigation_state_service.dart';
+import 'package:my_first_app/core/utils/baseline_risk_scoring.dart';
 import 'package:my_first_app/screens/result_screen.dart';
 import 'package:my_first_app/screens/baseline_risk_score_screen.dart';
 import 'package:my_first_app/core/utils/delay_summary.dart';
@@ -14,8 +16,6 @@ class BehavioralPsychosocialSummaryScreen extends StatelessWidget {
   final String autismRisk;
   final String adhdRisk;
   final String behaviorRisk;
-  final int baselineScore;
-  final String baselineCategory;
   final String immunizationStatus;
   final double weightKg;
   final double heightCm;
@@ -40,8 +40,6 @@ class BehavioralPsychosocialSummaryScreen extends StatelessWidget {
     required this.autismRisk,
     required this.adhdRisk,
     required this.behaviorRisk,
-    required this.baselineScore,
-    required this.baselineCategory,
     required this.immunizationStatus,
     required this.weightKg,
     required this.heightCm,
@@ -58,10 +56,45 @@ class BehavioralPsychosocialSummaryScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final baseline = calculateBaselineRisk(
+      autismRisk: autismRisk,
+      adhdRisk: adhdRisk,
+      behaviorRisk: behaviorRisk,
+      delaySummary: delaySummary,
+    );
+
+    NavigationStateService.instance.saveState(
+      screen: NavigationStateService.screenBehavioralPsychosocialSummary,
+      args: <String, dynamic>{
+        'child_id': childId,
+        'aww_id': awwId,
+        'age_months': ageMonths,
+        'gender_label': genderLabel,
+        'awc_code': awcCode,
+        'overall_risk': overallRisk,
+        'autism_risk': autismRisk,
+        'adhd_risk': adhdRisk,
+        'behavior_risk': behaviorRisk,
+        'baseline_score': baseline.score,
+        'baseline_category': baseline.category,
+        'immunization_status': immunizationStatus,
+        'weight_kg': weightKg,
+        'height_cm': heightCm,
+        'muac_cm': muacCm,
+        'birth_weight_kg': birthWeightKg,
+        'hemoglobin': hemoglobin,
+        'illness_history': illnessHistory,
+        'domain_scores': domainScores,
+        'domain_risk_levels': domainRiskLevels ?? <String, String>{},
+        'missed_milestones': missedMilestones,
+        'explainability': explainability,
+        'delay_summary': delaySummary ?? <String, int>{},
+      },
+    );
     final l10n = AppLocalizations.of(context);
     final immunizationLabel = _immunizationLabel(immunizationStatus, l10n);
     final overallRiskLabel = _prettyRisk(overallRisk);
-    final baselineLabel = _prettyRisk(baselineCategory);
+    final baselineLabel = _prettyRisk(baseline.category);
     final autismLabel = _prettyRisk(autismRisk);
     final adhdLabel = _prettyRisk(adhdRisk);
     final behaviorLabel = _prettyRisk(behaviorRisk);
@@ -133,7 +166,7 @@ class BehavioralPsychosocialSummaryScreen extends StatelessWidget {
                 Expanded(
                   child: _metricTile(
                     l10n.t('baseline_score_label'),
-                    '$baselineScore',
+                    '${baseline.score}',
                     const Color(0xFF0D5BA7),
                     const Color(0xFFE8F1FB),
                   ),
@@ -204,6 +237,8 @@ class BehavioralPsychosocialSummaryScreen extends StatelessWidget {
                     builder: (_) => ResultScreen(
                       domainScores: domainScores,
                       domainRiskLevels: domainRiskLevels,
+                      baselineScore: baseline.score,
+                      baselineCategory: baseline.category,
                       overallRisk: overallRisk,
                       missedMilestones: missedMilestones,
                       explainability: explainability,

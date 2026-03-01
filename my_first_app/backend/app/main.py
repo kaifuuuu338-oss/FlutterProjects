@@ -11,13 +11,35 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 if __package__:
-    from .model_service import load_artifacts, predict_risk
+    from .model_service import (
+        load_artifacts,
+        load_domain_models,
+        load_neuro_behavior_models,
+        predict_neuro_behavioral_risks,
+        predict_domain_delays,
+        predict_risk,
+    )
+    from .nutrition_model_service import (
+        load_nutrition_model,
+        predict_nutrition_risk as predict_nutrition_risk_ml,
+    )
     from .intervention import generate_intervention, calculate_trend
     from .problem_b_service import ProblemBService
     from .pg_compat import get_conn
 else:
     # Support running file directly: python main.py
-    from model_service import load_artifacts, predict_risk
+    from model_service import (
+        load_artifacts,
+        load_domain_models,
+        load_neuro_behavior_models,
+        predict_neuro_behavioral_risks,
+        predict_domain_delays,
+        predict_risk,
+    )
+    from nutrition_model_service import (
+        load_nutrition_model,
+        predict_nutrition_risk as predict_nutrition_risk_ml,
+    )
     from intervention import generate_intervention, calculate_trend
     from problem_b_service import ProblemBService
     from pg_compat import get_conn
@@ -61,6 +83,7 @@ except ImportError:
 
 DEFAULT_ECD_DATABASE_URL = "postgresql://postgres:postgres@127.0.0.1:5432/ecd_data"
 _AWC_DEMO_PATTERN = re.compile(r"^(AWW|AWS)_DEMO_(\d{3,4})$")
+_AWC_DEMO_REVERSED_PATTERN = re.compile(r"^DEMO_(AWW|AWS)_(\d{3,4})$")
 
 
 def _normalize_awc_code(value: Optional[str], prefer_prefix: str = "AWW") -> str:
@@ -68,6 +91,10 @@ def _normalize_awc_code(value: Optional[str], prefer_prefix: str = "AWW") -> str
     if not raw:
         return ""
     match = _AWC_DEMO_PATTERN.fullmatch(raw)
+    if not match:
+        reversed_match = _AWC_DEMO_REVERSED_PATTERN.fullmatch(raw)
+        if reversed_match:
+            match = reversed_match
     if not match:
         return raw
     suffix = match.group(2)
@@ -124,6 +151,7 @@ class ScreeningRequest(BaseModel):
     # Optional context fields if frontend sends later
     gender: Optional[str] = None
     awc_id: Optional[str] = None
+    awc_code: Optional[str] = None
     sector_id: Optional[str] = None
     mandal: Optional[str] = None
     district: Optional[str] = None
@@ -135,8 +163,31 @@ class ScreeningResponse(BaseModel):
     domain_scores: Dict[str, str]
     explanation: List[str]
     delay_summary: Dict[str, int]
+    model_source: Optional[str] = None
     referral_created: bool = False
     referral_data: Optional[Dict[str, str]] = None
+
+
+class NutritionPredictRequest(BaseModel):
+    child_id: Optional[str] = None
+    age_months: int
+    features: Dict[str, Any] = Field(default_factory=dict)
+
+
+class NutritionSubmitRequest(BaseModel):
+    child_id: str
+    age_months: int
+    awc_code: Optional[str] = None
+    aww_id: Optional[str] = None
+    waz: Optional[float] = None
+    haz: Optional[float] = None
+    whz: Optional[float] = None
+    underweight: int = 0
+    stunting: int = 0
+    wasting: int = 0
+    anemia: int = 0
+    nutrition_score: int = 0
+    risk_category: str = "Low"
 
 
 class ReferralRequest(BaseModel):
@@ -298,6 +349,7 @@ def _init_db(db_url: str) -> None:
             CREATE TABLE IF NOT EXISTS child_profile (
               child_id TEXT,
               dob TEXT,
+              gender TEXT,
               awc_code TEXT,
               district TEXT,
               mandal TEXT,
@@ -349,9 +401,166 @@ def _init_db(db_url: str) -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_child_profile_by_anganwadi_mandal ON child_profile_by_anganwadi(mandal)")
         conn.execute(
             """
+            UPDATE child_profile cp
+            SET awc_code = REPLACE(
+              REPLACE(
+                REPLACE(UPPER(BTRIM(cp.awc_code)), 'DEMO_AWW_', 'AWW_DEMO_'),
+                'DEMO_AWS_',
+                'AWS_DEMO_'
+              ),
+              'AWS_DEMO_',
+              'AWW_DEMO_'
+            )
+            WHERE COALESCE(BTRIM(cp.awc_code), '') <> ''
+              AND UPPER(BTRIM(cp.awc_code)) <> REPLACE(
+                REPLACE(
+                  REPLACE(UPPER(BTRIM(cp.awc_code)), 'DEMO_AWW_', 'AWW_DEMO_'),
+                  'DEMO_AWS_',
+                  'AWS_DEMO_'
+                ),
+                'AWS_DEMO_',
+                'AWW_DEMO_'
+              )
+              AND NOT EXISTS (
+                SELECT 1
+                FROM child_profile dup
+                WHERE dup.child_id = cp.child_id
+                  AND UPPER(BTRIM(COALESCE(dup.awc_code, ''))) = REPLACE(
+                    REPLACE(
+                      REPLACE(UPPER(BTRIM(cp.awc_code)), 'DEMO_AWW_', 'AWW_DEMO_'),
+                      'DEMO_AWS_',
+                      'AWS_DEMO_'
+                    ),
+                    'AWS_DEMO_',
+                    'AWW_DEMO_'
+                  )
+                  AND dup.ctid <> cp.ctid
+              )
+            """
+        )
+        conn.execute(
+            """
+            UPDATE child_profile_by_district cp
+            SET awc_code = REPLACE(
+              REPLACE(
+                REPLACE(UPPER(BTRIM(cp.awc_code)), 'DEMO_AWW_', 'AWW_DEMO_'),
+                'DEMO_AWS_',
+                'AWS_DEMO_'
+              ),
+              'AWS_DEMO_',
+              'AWW_DEMO_'
+            )
+            WHERE COALESCE(BTRIM(cp.awc_code), '') <> ''
+              AND UPPER(BTRIM(cp.awc_code)) <> REPLACE(
+                REPLACE(
+                  REPLACE(UPPER(BTRIM(cp.awc_code)), 'DEMO_AWW_', 'AWW_DEMO_'),
+                  'DEMO_AWS_',
+                  'AWS_DEMO_'
+                ),
+                'AWS_DEMO_',
+                'AWW_DEMO_'
+              )
+              AND NOT EXISTS (
+                SELECT 1
+                FROM child_profile_by_district dup
+                WHERE dup.child_id = cp.child_id
+                  AND UPPER(BTRIM(COALESCE(dup.awc_code, ''))) = REPLACE(
+                    REPLACE(
+                      REPLACE(UPPER(BTRIM(cp.awc_code)), 'DEMO_AWW_', 'AWW_DEMO_'),
+                      'DEMO_AWS_',
+                      'AWS_DEMO_'
+                    ),
+                    'AWS_DEMO_',
+                    'AWW_DEMO_'
+                  )
+                  AND dup.ctid <> cp.ctid
+              )
+            """
+        )
+        conn.execute(
+            """
+            UPDATE child_profile_by_mandal cp
+            SET awc_code = REPLACE(
+              REPLACE(
+                REPLACE(UPPER(BTRIM(cp.awc_code)), 'DEMO_AWW_', 'AWW_DEMO_'),
+                'DEMO_AWS_',
+                'AWS_DEMO_'
+              ),
+              'AWS_DEMO_',
+              'AWW_DEMO_'
+            )
+            WHERE COALESCE(BTRIM(cp.awc_code), '') <> ''
+              AND UPPER(BTRIM(cp.awc_code)) <> REPLACE(
+                REPLACE(
+                  REPLACE(UPPER(BTRIM(cp.awc_code)), 'DEMO_AWW_', 'AWW_DEMO_'),
+                  'DEMO_AWS_',
+                  'AWS_DEMO_'
+                ),
+                'AWS_DEMO_',
+                'AWW_DEMO_'
+              )
+              AND NOT EXISTS (
+                SELECT 1
+                FROM child_profile_by_mandal dup
+                WHERE dup.child_id = cp.child_id
+                  AND UPPER(BTRIM(COALESCE(dup.awc_code, ''))) = REPLACE(
+                    REPLACE(
+                      REPLACE(UPPER(BTRIM(cp.awc_code)), 'DEMO_AWW_', 'AWW_DEMO_'),
+                      'DEMO_AWS_',
+                      'AWS_DEMO_'
+                    ),
+                    'AWS_DEMO_',
+                    'AWW_DEMO_'
+                  )
+                  AND dup.ctid <> cp.ctid
+              )
+            """
+        )
+        conn.execute(
+            """
+            UPDATE child_profile_by_anganwadi cp
+            SET awc_code = REPLACE(
+              REPLACE(
+                REPLACE(UPPER(BTRIM(cp.awc_code)), 'DEMO_AWW_', 'AWW_DEMO_'),
+                'DEMO_AWS_',
+                'AWS_DEMO_'
+              ),
+              'AWS_DEMO_',
+              'AWW_DEMO_'
+            )
+            WHERE COALESCE(BTRIM(cp.awc_code), '') <> ''
+              AND UPPER(BTRIM(cp.awc_code)) <> REPLACE(
+                REPLACE(
+                  REPLACE(UPPER(BTRIM(cp.awc_code)), 'DEMO_AWW_', 'AWW_DEMO_'),
+                  'DEMO_AWS_',
+                  'AWS_DEMO_'
+                ),
+                'AWS_DEMO_',
+                'AWW_DEMO_'
+              )
+              AND NOT EXISTS (
+                SELECT 1
+                FROM child_profile_by_anganwadi dup
+                WHERE dup.child_id = cp.child_id
+                  AND UPPER(BTRIM(COALESCE(dup.awc_code, ''))) = REPLACE(
+                    REPLACE(
+                      REPLACE(UPPER(BTRIM(cp.awc_code)), 'DEMO_AWW_', 'AWW_DEMO_'),
+                      'DEMO_AWS_',
+                      'AWS_DEMO_'
+                    ),
+                    'AWS_DEMO_',
+                    'AWW_DEMO_'
+                  )
+                  AND dup.ctid <> cp.ctid
+              )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS screening_event (
               id BIGSERIAL PRIMARY KEY,
               child_id TEXT,
+              awc_code TEXT,
               age_months INTEGER,
               overall_risk TEXT,
               explainability TEXT,
@@ -359,6 +568,39 @@ def _init_db(db_url: str) -> None:
               created_at TEXT
             )
             """
+        )
+        conn.execute("ALTER TABLE screening_event ADD COLUMN IF NOT EXISTS awc_code TEXT")
+        conn.execute(
+            """
+            UPDATE screening_event
+            SET awc_code = REPLACE(
+              REPLACE(
+                REPLACE(UPPER(BTRIM(awc_code)), 'DEMO_AWW_', 'AWW_DEMO_'),
+                'DEMO_AWS_',
+                'AWS_DEMO_'
+              ),
+              'AWS_DEMO_',
+              'AWW_DEMO_'
+            )
+            WHERE COALESCE(BTRIM(awc_code), '') <> ''
+            """
+        )
+        conn.execute(
+            """
+            UPDATE screening_event se
+            SET awc_code = cp.awc_code
+            FROM (
+              SELECT child_id, MIN(awc_code) AS awc_code
+              FROM child_profile
+              GROUP BY child_id
+              HAVING COUNT(DISTINCT awc_code) = 1
+            ) cp
+            WHERE se.child_id = cp.child_id
+              AND COALESCE(BTRIM(se.awc_code), '') = ''
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_screening_event_child_awc ON screening_event(child_id, awc_code)"
         )
         conn.execute(
             """
@@ -370,6 +612,376 @@ def _init_db(db_url: str) -> None:
               score DOUBLE PRECISION
             )
             """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS developmental_risk_score (
+              id BIGSERIAL PRIMARY KEY,
+              screening_id BIGINT,
+              child_id TEXT,
+              awc_code TEXT,
+              age_months INTEGER,
+              gm_delay INTEGER,
+              fm_delay INTEGER,
+              lc_delay INTEGER,
+              cog_delay INTEGER,
+              se_delay INTEGER,
+              num_delays INTEGER,
+              created_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_developmental_risk_score_screening_id "
+            "ON developmental_risk_score(screening_id)"
+        )
+        conn.execute(
+            "ALTER TABLE developmental_risk_score ADD COLUMN IF NOT EXISTS awc_code TEXT"
+        )
+        conn.execute(
+            """
+            UPDATE developmental_risk_score
+            SET awc_code = REPLACE(
+              REPLACE(
+                REPLACE(UPPER(BTRIM(awc_code)), 'DEMO_AWW_', 'AWW_DEMO_'),
+                'DEMO_AWS_',
+                'AWS_DEMO_'
+              ),
+              'AWS_DEMO_',
+              'AWW_DEMO_'
+            )
+            WHERE COALESCE(BTRIM(awc_code), '') <> ''
+            """
+        )
+        conn.execute(
+            """
+            UPDATE developmental_risk_score dr
+            SET awc_code = UPPER(BTRIM(COALESCE(se.awc_code, '')))
+            FROM screening_event se
+            WHERE dr.screening_id = se.id
+              AND COALESCE(BTRIM(dr.awc_code), '') = ''
+              AND COALESCE(BTRIM(se.awc_code), '') <> ''
+            """
+        )
+        conn.execute(
+            """
+            DELETE FROM developmental_risk_score
+            WHERE COALESCE(BTRIM(child_id), '') = ''
+            """
+        )
+        conn.execute(
+            "DROP INDEX IF EXISTS idx_developmental_risk_score_child_id"
+        )
+        conn.execute(
+            "DROP INDEX IF EXISTS ux_developmental_risk_score_child_awc"
+        )
+        conn.execute(
+            "DROP INDEX IF EXISTS ux_developmental_risk_score_child_id"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_developmental_risk_score_child_id "
+            "ON developmental_risk_score(child_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_developmental_risk_score_awc_code "
+            "ON developmental_risk_score(awc_code)"
+        )
+        conn.execute(
+            """
+            DELETE FROM developmental_risk_score dr
+            USING screening_domain_score sds
+            WHERE dr.screening_id = sds.screening_id
+              AND UPPER(BTRIM(COALESCE(sds.domain, ''))) IN ('BPS_AUT', 'BPS_ADHD', 'BPS_BEH')
+            """
+        )
+        conn.execute(
+            """
+            WITH domain_flags AS (
+              SELECT
+                screening_id,
+                MAX(CASE WHEN UPPER(BTRIM(COALESCE(domain, ''))) = 'GM'
+                  THEN CASE WHEN UPPER(BTRIM(COALESCE(risk_label, 'LOW'))) IN ('LOW', '') THEN 0 ELSE 1 END
+                  ELSE 0 END) AS gm_delay,
+                MAX(CASE WHEN UPPER(BTRIM(COALESCE(domain, ''))) = 'FM'
+                  THEN CASE WHEN UPPER(BTRIM(COALESCE(risk_label, 'LOW'))) IN ('LOW', '') THEN 0 ELSE 1 END
+                  ELSE 0 END) AS fm_delay,
+                MAX(CASE WHEN UPPER(BTRIM(COALESCE(domain, ''))) = 'LC'
+                  THEN CASE WHEN UPPER(BTRIM(COALESCE(risk_label, 'LOW'))) IN ('LOW', '') THEN 0 ELSE 1 END
+                  ELSE 0 END) AS lc_delay,
+                MAX(CASE WHEN UPPER(BTRIM(COALESCE(domain, ''))) = 'COG'
+                  THEN CASE WHEN UPPER(BTRIM(COALESCE(risk_label, 'LOW'))) IN ('LOW', '') THEN 0 ELSE 1 END
+                  ELSE 0 END) AS cog_delay,
+                MAX(CASE WHEN UPPER(BTRIM(COALESCE(domain, ''))) = 'SE'
+                  THEN CASE WHEN UPPER(BTRIM(COALESCE(risk_label, 'LOW'))) IN ('LOW', '') THEN 0 ELSE 1 END
+                  ELSE 0 END) AS se_delay,
+                MAX(CASE WHEN UPPER(BTRIM(COALESCE(domain, ''))) IN ('GM', 'FM', 'LC', 'COG', 'SE')
+                  THEN 1 ELSE 0 END) AS has_dev_domain
+              FROM screening_domain_score
+              GROUP BY screening_id
+            )
+            INSERT INTO developmental_risk_score(
+              screening_id, child_id, awc_code, age_months,
+              gm_delay, fm_delay, lc_delay, cog_delay, se_delay, num_delays,
+              created_at
+            )
+            SELECT
+              se.id,
+              se.child_id,
+              REPLACE(
+                REPLACE(
+                  REPLACE(UPPER(BTRIM(COALESCE(se.awc_code, ''))), 'DEMO_AWW_', 'AWW_DEMO_'),
+                  'DEMO_AWS_',
+                  'AWS_DEMO_'
+                ),
+                'AWS_DEMO_',
+                'AWW_DEMO_'
+              ) AS awc_code,
+              COALESCE(se.age_months, 0),
+              df.gm_delay,
+              df.fm_delay,
+              df.lc_delay,
+              df.cog_delay,
+              df.se_delay,
+              (df.gm_delay + df.fm_delay + df.lc_delay + df.cog_delay + df.se_delay) AS num_delays,
+              COALESCE(NULLIF(BTRIM(COALESCE(se.created_at, '')), ''), now()::text)
+            FROM screening_event se
+            JOIN domain_flags df
+              ON df.screening_id = se.id
+             AND df.has_dev_domain = 1
+            LEFT JOIN developmental_risk_score dr
+              ON dr.screening_id = se.id
+            WHERE dr.screening_id IS NULL
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS domain_delay_table (
+              id BIGSERIAL PRIMARY KEY,
+              screening_id BIGINT,
+              child_id TEXT,
+              awc_code TEXT,
+              age_months INTEGER,
+              gm_delay INTEGER,
+              fm_delay INTEGER,
+              lc_delay INTEGER,
+              cog_delay INTEGER,
+              se_delay INTEGER,
+              num_delays INTEGER,
+              created_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_domain_delay_table_screening_id "
+            "ON domain_delay_table(screening_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_domain_delay_table_child_id "
+            "ON domain_delay_table(child_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_domain_delay_table_awc_code "
+            "ON domain_delay_table(awc_code)"
+        )
+        conn.execute(
+            """
+            UPDATE domain_delay_table
+            SET awc_code = REPLACE(
+              REPLACE(
+                REPLACE(UPPER(BTRIM(awc_code)), 'DEMO_AWW_', 'AWW_DEMO_'),
+                'DEMO_AWS_',
+                'AWS_DEMO_'
+              ),
+              'AWS_DEMO_',
+              'AWW_DEMO_'
+            )
+            WHERE COALESCE(BTRIM(awc_code), '') <> ''
+            """
+        )
+        conn.execute(
+            """
+            UPDATE domain_delay_table ddt
+            SET awc_code = UPPER(BTRIM(COALESCE(se.awc_code, '')))
+            FROM screening_event se
+            WHERE ddt.screening_id = se.id
+              AND COALESCE(BTRIM(ddt.awc_code), '') = ''
+              AND COALESCE(BTRIM(se.awc_code), '') <> ''
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO domain_delay_table(
+              screening_id, child_id, awc_code, age_months,
+              gm_delay, fm_delay, lc_delay, cog_delay, se_delay, num_delays,
+              created_at
+            )
+            SELECT
+              dr.screening_id,
+              dr.child_id,
+              REPLACE(
+                REPLACE(
+                  REPLACE(
+                    UPPER(
+                      BTRIM(
+                        COALESCE(
+                          NULLIF(BTRIM(dr.awc_code), ''),
+                          NULLIF(BTRIM(se.awc_code), ''),
+                          ''
+                        )
+                      )
+                    ),
+                    'DEMO_AWW_',
+                    'AWW_DEMO_'
+                  ),
+                  'DEMO_AWS_',
+                  'AWS_DEMO_'
+                ),
+                'AWS_DEMO_',
+                'AWW_DEMO_'
+              ) AS awc_code,
+              COALESCE(dr.age_months, se.age_months, 0),
+              COALESCE(dr.gm_delay, 0),
+              COALESCE(dr.fm_delay, 0),
+              COALESCE(dr.lc_delay, 0),
+              COALESCE(dr.cog_delay, 0),
+              COALESCE(dr.se_delay, 0),
+              COALESCE(
+                dr.num_delays,
+                COALESCE(dr.gm_delay, 0) + COALESCE(dr.fm_delay, 0) + COALESCE(dr.lc_delay, 0)
+                + COALESCE(dr.cog_delay, 0) + COALESCE(dr.se_delay, 0)
+              ),
+              COALESCE(
+                NULLIF(BTRIM(COALESCE(dr.created_at, '')), ''),
+                NULLIF(BTRIM(COALESCE(se.created_at, '')), ''),
+                now()::text
+              )
+            FROM developmental_risk_score dr
+            LEFT JOIN screening_event se
+              ON se.id = dr.screening_id
+            LEFT JOIN domain_delay_table ddt
+              ON ddt.screening_id = dr.screening_id
+            WHERE dr.screening_id IS NOT NULL
+              AND ddt.screening_id IS NULL
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS nutrition_result (
+              id BIGSERIAL PRIMARY KEY,
+              child_id TEXT NOT NULL,
+              awc_code TEXT,
+              aww_id TEXT,
+              age_months INTEGER,
+              waz DOUBLE PRECISION,
+              haz DOUBLE PRECISION,
+              whz DOUBLE PRECISION,
+              underweight INTEGER,
+              stunting INTEGER,
+              wasting INTEGER,
+              anemia INTEGER,
+              nutrition_score INTEGER,
+              risk_category TEXT,
+              created_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nutrition_result_child_id ON nutrition_result(child_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nutrition_result_awc_code ON nutrition_result(awc_code)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nutrition_result_created_at ON nutrition_result(created_at)"
+        )
+        conn.execute(
+            """
+            UPDATE nutrition_result
+            SET awc_code = ''
+            WHERE awc_code IS NULL
+            """
+        )
+        conn.execute(
+            """
+            UPDATE nutrition_result
+            SET awc_code = REPLACE(
+              REPLACE(
+                REPLACE(UPPER(BTRIM(awc_code)), 'DEMO_AWW_', 'AWW_DEMO_'),
+                'DEMO_AWS_',
+                'AWS_DEMO_'
+              ),
+              'AWS_DEMO_',
+              'AWW_DEMO_'
+            )
+            WHERE COALESCE(BTRIM(awc_code), '') <> ''
+            """
+        )
+        conn.execute(
+            """
+            DELETE FROM nutrition_result n
+            USING nutrition_result d
+            WHERE n.ctid < d.ctid
+              AND COALESCE(n.child_id, '') = COALESCE(d.child_id, '')
+              AND COALESCE(n.awc_code, '') = COALESCE(d.awc_code, '')
+            """
+        )
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_nutrition_result_child_awc
+            ON nutrition_result(child_id, awc_code)
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS neuro_logical_risk (
+              child_id TEXT,
+              autism_risk TEXT,
+              adhd_risk TEXT,
+              behavioral_risk TEXT
+            )
+            """
+        )
+        conn.execute(
+            "ALTER TABLE neuro_logical_risk ADD COLUMN IF NOT EXISTS child_id TEXT"
+        )
+        conn.execute(
+            "ALTER TABLE neuro_logical_risk ADD COLUMN IF NOT EXISTS autism_risk TEXT"
+        )
+        conn.execute(
+            "ALTER TABLE neuro_logical_risk ADD COLUMN IF NOT EXISTS adhd_risk TEXT"
+        )
+        conn.execute(
+            "ALTER TABLE neuro_logical_risk ADD COLUMN IF NOT EXISTS behavioral_risk TEXT"
+        )
+        conn.execute(
+            "DROP INDEX IF EXISTS ux_neuro_logical_risk_screening_id"
+        )
+        conn.execute(
+            "DROP INDEX IF EXISTS idx_neuro_logical_risk_child_id"
+        )
+        conn.execute(
+            "DROP INDEX IF EXISTS ux_neuro_logical_risk_child_awc"
+        )
+        conn.execute(
+            "ALTER TABLE neuro_logical_risk DROP CONSTRAINT IF EXISTS neuro_logical_risk_pkey"
+        )
+        conn.execute("ALTER TABLE neuro_logical_risk DROP COLUMN IF EXISTS id")
+        conn.execute("ALTER TABLE neuro_logical_risk DROP COLUMN IF EXISTS screening_id")
+        conn.execute("ALTER TABLE neuro_logical_risk DROP COLUMN IF EXISTS age_months")
+        conn.execute("ALTER TABLE neuro_logical_risk DROP COLUMN IF EXISTS overall_risk")
+        conn.execute("ALTER TABLE neuro_logical_risk DROP COLUMN IF EXISTS model_source")
+        conn.execute("ALTER TABLE neuro_logical_risk DROP COLUMN IF EXISTS created_at")
+        conn.execute(
+            """
+            DELETE FROM neuro_logical_risk n
+            USING neuro_logical_risk d
+            WHERE n.ctid < d.ctid
+              AND COALESCE(n.child_id, '') = COALESCE(d.child_id, '')
+            """
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_neuro_logical_risk_child_id "
+            "ON neuro_logical_risk(child_id)"
         )
         conn.execute(
             """
@@ -446,7 +1058,6 @@ def _init_db(db_url: str) -> None:
 
         # Keep only core child_profile columns used by current registration flow.
         conn.execute("ALTER TABLE child_profile DROP COLUMN IF EXISTS child_name")
-        conn.execute("ALTER TABLE child_profile DROP COLUMN IF EXISTS gender")
         conn.execute("ALTER TABLE child_profile DROP COLUMN IF EXISTS age_months")
         conn.execute("ALTER TABLE child_profile DROP COLUMN IF EXISTS village")
         conn.execute("ALTER TABLE child_profile DROP COLUMN IF EXISTS awc_id")
@@ -455,6 +1066,18 @@ def _init_db(db_url: str) -> None:
         conn.execute("ALTER TABLE child_profile DROP COLUMN IF EXISTS district_id")
         conn.execute("ALTER TABLE child_profile DROP COLUMN IF EXISTS created_at")
         conn.execute("ALTER TABLE child_profile DROP COLUMN IF EXISTS updated_at")
+        conn.execute("ALTER TABLE child_profile ADD COLUMN IF NOT EXISTS gender TEXT")
+        conn.execute("UPDATE child_profile SET gender = '' WHERE gender IS NULL")
+        conn.execute(
+            """
+            UPDATE child_profile
+            SET gender = CASE
+              WHEN LOWER(BTRIM(gender)) IN ('m', 'male') THEN 'M'
+              WHEN LOWER(BTRIM(gender)) IN ('f', 'female') THEN 'F'
+              ELSE ''
+            END
+            """
+        )
         conn.execute("UPDATE child_profile SET awc_code = '' WHERE awc_code IS NULL")
         conn.execute("UPDATE child_profile_by_district SET awc_code = '' WHERE awc_code IS NULL")
         conn.execute("UPDATE child_profile_by_mandal SET awc_code = '' WHERE awc_code IS NULL")
@@ -482,10 +1105,14 @@ def _init_db(db_url: str) -> None:
             RETURNS TEXT
             AS $$
             DECLARE
+              code TEXT;
               normalized TEXT;
             BEGIN
+              code := UPPER(BTRIM(COALESCE(raw_awc_code, '')));
+              code := REGEXP_REPLACE(code, '^DEMO_(AWW|AWS)_(\\d{3,4})$', 'AWW_DEMO_\\2');
+              code := REGEXP_REPLACE(code, '^AWS_DEMO_(\\d{3,4})$', 'AWW_DEMO_\\1');
               normalized := REGEXP_REPLACE(
-                LOWER(COALESCE(raw_awc_code, '')),
+                LOWER(COALESCE(code, '')),
                 '[^a-z0-9]+',
                 '_',
                 'g'
@@ -509,7 +1136,7 @@ def _init_db(db_url: str) -> None:
             BEGIN
               table_name := anganwadi_child_table_name(raw_awc_code);
               EXECUTE format(
-                'CREATE TABLE IF NOT EXISTS %%I (
+                'CREATE TABLE IF NOT EXISTS %I (
                   child_id TEXT PRIMARY KEY,
                   dob TEXT,
                   awc_code TEXT NOT NULL,
@@ -537,18 +1164,307 @@ def _init_db(db_url: str) -> None:
               IF code IS NULL THEN
                 RETURN NULL;
               END IF;
+              code := UPPER(code);
+              code := REGEXP_REPLACE(code, '^DEMO_(AWW|AWS)_(\\d{3,4})$', 'AWW_DEMO_\\2');
+              code := REGEXP_REPLACE(code, '^AWS_DEMO_(\\d{3,4})$', 'AWW_DEMO_\\1');
               table_name := ensure_anganwadi_child_table(code);
-              EXECUTE format('TRUNCATE TABLE %%I', table_name);
+              EXECUTE format('TRUNCATE TABLE %I', table_name);
               EXECUTE format(
-                'INSERT INTO %%I (
+                'INSERT INTO %I (
                   child_id, dob, awc_code, district, mandal, assessment_cycle
                 )
                 SELECT
                   child_id, dob, awc_code, district, mandal, assessment_cycle
                 FROM child_profile_by_anganwadi
-                WHERE BTRIM(awc_code) = $1',
+                WHERE UPPER(BTRIM(COALESCE(awc_code, ''''))) = $1',
                 table_name
               ) USING code;
+              RETURN table_name;
+            END;
+            $$ LANGUAGE plpgsql
+            """
+        )
+        conn.execute(
+            """
+            CREATE OR REPLACE FUNCTION anganwadi_developmental_table_name(raw_awc_code TEXT)
+            RETURNS TEXT
+            AS $$
+            DECLARE
+              code TEXT;
+              normalized TEXT;
+            BEGIN
+              code := UPPER(BTRIM(COALESCE(raw_awc_code, '')));
+              code := REGEXP_REPLACE(code, '^DEMO_(AWW|AWS)_(\\d{3,4})$', 'AWW_DEMO_\\2');
+              code := REGEXP_REPLACE(code, '^AWS_DEMO_(\\d{3,4})$', 'AWW_DEMO_\\1');
+              normalized := REGEXP_REPLACE(
+                LOWER(COALESCE(code, '')),
+                '[^a-z0-9]+',
+                '_',
+                'g'
+              );
+              normalized := BTRIM(normalized, '_');
+              IF normalized = '' THEN
+                normalized := 'unknown';
+              END IF;
+              RETURN 'developmental_risk_score_awc_' || normalized;
+            END;
+            $$ LANGUAGE plpgsql IMMUTABLE
+            """
+        )
+        conn.execute(
+            """
+            CREATE OR REPLACE FUNCTION ensure_anganwadi_developmental_table(raw_awc_code TEXT)
+            RETURNS TEXT
+            AS $$
+            DECLARE
+              table_name TEXT;
+              idx_child_name TEXT;
+              idx_screening_name TEXT;
+              pk_name TEXT;
+              pk_def TEXT;
+            BEGIN
+              table_name := anganwadi_developmental_table_name(raw_awc_code);
+              idx_child_name := table_name || '_child_idx';
+              idx_screening_name := table_name || '_screening_idx';
+              EXECUTE format(
+                'CREATE TABLE IF NOT EXISTS %I (
+                  id BIGSERIAL PRIMARY KEY,
+                  screening_id BIGINT,
+                  child_id TEXT,
+                  age_months INTEGER,
+                  gm_delay INTEGER,
+                  fm_delay INTEGER,
+                  lc_delay INTEGER,
+                  cog_delay INTEGER,
+                  se_delay INTEGER,
+                  num_delays INTEGER,
+                  created_at TEXT
+                )',
+                table_name
+              );
+              SELECT c.conname, pg_get_constraintdef(c.oid)
+              INTO pk_name, pk_def
+              FROM pg_constraint c
+              JOIN pg_class t ON t.oid = c.conrelid
+              WHERE c.contype = 'p'
+                AND t.relname = table_name
+              LIMIT 1;
+
+              IF pk_name IS NOT NULL AND pk_def ILIKE '%child_id%' THEN
+                EXECUTE format('ALTER TABLE %I DROP CONSTRAINT %I', table_name, pk_name);
+              END IF;
+
+              EXECUTE format(
+                'CREATE INDEX IF NOT EXISTS %I ON %I(child_id)',
+                idx_child_name,
+                table_name
+              );
+              EXECUTE format(
+                'CREATE INDEX IF NOT EXISTS %I ON %I(screening_id)',
+                idx_screening_name,
+                table_name
+              );
+              RETURN table_name;
+            END;
+            $$ LANGUAGE plpgsql
+            """
+        )
+        conn.execute(
+            """
+            CREATE OR REPLACE FUNCTION upsert_anganwadi_developmental_risk(
+              raw_awc_code TEXT,
+              p_child_id TEXT,
+              p_screening_id BIGINT,
+              p_age_months INTEGER,
+              p_gm_delay INTEGER,
+              p_fm_delay INTEGER,
+              p_lc_delay INTEGER,
+              p_cog_delay INTEGER,
+              p_se_delay INTEGER,
+              p_num_delays INTEGER,
+              p_created_at TEXT
+            )
+            RETURNS TEXT
+            AS $$
+            DECLARE
+              code TEXT;
+              table_name TEXT;
+            BEGIN
+              code := NULLIF(BTRIM(raw_awc_code), '');
+              IF code IS NULL THEN
+                RETURN NULL;
+              END IF;
+              code := UPPER(code);
+              code := REGEXP_REPLACE(code, '^DEMO_(AWW|AWS)_(\\d{3,4})$', 'AWW_DEMO_\\2');
+              code := REGEXP_REPLACE(code, '^AWS_DEMO_(\\d{3,4})$', 'AWW_DEMO_\\1');
+
+              table_name := ensure_anganwadi_developmental_table(code);
+
+              EXECUTE format(
+                'INSERT INTO %I(
+                  child_id, screening_id, age_months,
+                  gm_delay, fm_delay, lc_delay, cog_delay, se_delay, num_delays,
+                  created_at
+                )
+                VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
+                table_name
+              )
+              USING
+                p_child_id,
+                p_screening_id,
+                p_age_months,
+                p_gm_delay,
+                p_fm_delay,
+                p_lc_delay,
+                p_cog_delay,
+                p_se_delay,
+                p_num_delays,
+                p_created_at;
+
+              RETURN table_name;
+            END;
+            $$ LANGUAGE plpgsql
+            """
+        )
+        conn.execute(
+            """
+            CREATE OR REPLACE FUNCTION anganwadi_nutrition_table_name(raw_awc_code TEXT)
+            RETURNS TEXT
+            AS $$
+            DECLARE
+              code TEXT;
+              normalized TEXT;
+            BEGIN
+              code := UPPER(BTRIM(COALESCE(raw_awc_code, '')));
+              code := REGEXP_REPLACE(code, '^DEMO_(AWW|AWS)_(\\d{3,4})$', 'AWW_DEMO_\\2');
+              code := REGEXP_REPLACE(code, '^AWS_DEMO_(\\d{3,4})$', 'AWW_DEMO_\\1');
+              normalized := REGEXP_REPLACE(
+                LOWER(COALESCE(code, '')),
+                '[^a-z0-9]+',
+                '_',
+                'g'
+              );
+              normalized := BTRIM(normalized, '_');
+              IF normalized = '' THEN
+                normalized := 'unknown';
+              END IF;
+              RETURN 'nutrition_result_awc_' || normalized;
+            END;
+            $$ LANGUAGE plpgsql IMMUTABLE
+            """
+        )
+        conn.execute(
+            """
+            CREATE OR REPLACE FUNCTION ensure_anganwadi_nutrition_table(raw_awc_code TEXT)
+            RETURNS TEXT
+            AS $$
+            DECLARE
+              table_name TEXT;
+              idx_child_name TEXT;
+              idx_created_name TEXT;
+            BEGIN
+              table_name := anganwadi_nutrition_table_name(raw_awc_code);
+              idx_child_name := table_name || '_child_idx';
+              idx_created_name := table_name || '_created_idx';
+              EXECUTE format(
+                'CREATE TABLE IF NOT EXISTS %I (
+                  id BIGSERIAL PRIMARY KEY,
+                  child_id TEXT NOT NULL,
+                  aww_id TEXT,
+                  age_months INTEGER,
+                  waz DOUBLE PRECISION,
+                  haz DOUBLE PRECISION,
+                  whz DOUBLE PRECISION,
+                  underweight INTEGER,
+                  stunting INTEGER,
+                  wasting INTEGER,
+                  anemia INTEGER,
+                  nutrition_score INTEGER,
+                  risk_category TEXT,
+                  created_at TEXT
+                )',
+                table_name
+              );
+              EXECUTE format(
+                'CREATE INDEX IF NOT EXISTS %I ON %I(child_id)',
+                idx_child_name,
+                table_name
+              );
+              EXECUTE format(
+                'CREATE INDEX IF NOT EXISTS %I ON %I(created_at)',
+                idx_created_name,
+                table_name
+              );
+              RETURN table_name;
+            END;
+            $$ LANGUAGE plpgsql
+            """
+        )
+        conn.execute(
+            """
+            CREATE OR REPLACE FUNCTION insert_anganwadi_nutrition_result(
+              raw_awc_code TEXT,
+              p_child_id TEXT,
+              p_aww_id TEXT,
+              p_age_months INTEGER,
+              p_waz DOUBLE PRECISION,
+              p_haz DOUBLE PRECISION,
+              p_whz DOUBLE PRECISION,
+              p_underweight INTEGER,
+              p_stunting INTEGER,
+              p_wasting INTEGER,
+              p_anemia INTEGER,
+              p_nutrition_score INTEGER,
+              p_risk_category TEXT,
+              p_created_at TEXT
+            )
+            RETURNS TEXT
+            AS $$
+            DECLARE
+              code TEXT;
+              table_name TEXT;
+            BEGIN
+              code := NULLIF(BTRIM(raw_awc_code), '');
+              IF code IS NULL THEN
+                RETURN NULL;
+              END IF;
+              code := UPPER(code);
+              code := REGEXP_REPLACE(code, '^DEMO_(AWW|AWS)_(\\d{3,4})$', 'AWW_DEMO_\\2');
+              code := REGEXP_REPLACE(code, '^AWS_DEMO_(\\d{3,4})$', 'AWW_DEMO_\\1');
+
+              table_name := ensure_anganwadi_nutrition_table(code);
+
+              EXECUTE format(
+                'DELETE FROM %I WHERE child_id = $1',
+                table_name
+              )
+              USING p_child_id;
+
+              EXECUTE format(
+                'INSERT INTO %I(
+                  child_id, aww_id, age_months,
+                  waz, haz, whz,
+                  underweight, stunting, wasting, anemia,
+                  nutrition_score, risk_category, created_at
+                )
+                VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)',
+                table_name
+              )
+              USING
+                p_child_id,
+                p_aww_id,
+                p_age_months,
+                p_waz,
+                p_haz,
+                p_whz,
+                p_underweight,
+                p_stunting,
+                p_wasting,
+                p_anemia,
+                p_nutrition_score,
+                p_risk_category,
+                p_created_at;
+
               RETURN table_name;
             END;
             $$ LANGUAGE plpgsql
@@ -586,7 +1502,7 @@ def _init_db(db_url: str) -> None:
                   AND awc_code = COALESCE(BTRIM(OLD.awc_code), '');
                 IF old_awc IS NOT NULL THEN
                   old_table := ensure_anganwadi_child_table(old_awc);
-                  EXECUTE format('DELETE FROM %%I WHERE child_id = $1', old_table)
+                  EXECUTE format('DELETE FROM %I WHERE child_id = $1', old_table)
                   USING OLD.child_id;
                 END IF;
                 RETURN OLD;
@@ -646,14 +1562,14 @@ def _init_db(db_url: str) -> None:
 
               IF TG_OP = 'UPDATE' AND old_awc IS NOT NULL THEN
                 old_table := ensure_anganwadi_child_table(old_awc);
-                EXECUTE format('DELETE FROM %%I WHERE child_id = $1', old_table)
+                EXECUTE format('DELETE FROM %I WHERE child_id = $1', old_table)
                 USING OLD.child_id;
               END IF;
 
               IF new_awc IS NOT NULL THEN
                 new_table := ensure_anganwadi_child_table(new_awc);
                 EXECUTE format(
-                  'INSERT INTO %%I(
+                  'INSERT INTO %I(
                     child_id, dob, awc_code, district, mandal, assessment_cycle
                   )
                   VALUES($1, $2, $3, $4, $5, $6)
@@ -712,6 +1628,46 @@ def _risk_score(label: str) -> float:
     return {"Low": 0.2, "Medium": 0.5, "High": 0.75, "Critical": 0.92}.get(_normalize_risk(label), 0.2)
 
 
+def _extract_neuro_risk_labels(domain_scores: Dict[str, str]) -> Optional[Dict[str, str]]:
+    if not domain_scores:
+        return None
+
+    by_key = {
+        str(key).strip().upper(): _normalize_risk(str(value))
+        for key, value in (domain_scores or {}).items()
+    }
+
+    autism = (
+        by_key.get("BPS_AUT")
+        or by_key.get("AUTISM")
+        or by_key.get("AUT")
+    )
+    adhd = by_key.get("BPS_ADHD") or by_key.get("ADHD")
+    behavioral = (
+        by_key.get("BPS_BEH")
+        or by_key.get("BEHAVIORAL")
+        or by_key.get("BEHAVIOURAL")
+        or by_key.get("BEHAVIOR")
+    )
+
+    if autism is None and adhd is None and behavioral is None:
+        return None
+
+    autism = autism or "Low"
+    adhd = adhd or "Low"
+    behavioral = behavioral or "Low"
+    return {
+        "autism_risk": autism,
+        "adhd_risk": adhd,
+        "behavioral_risk": behavioral,
+    }
+
+
+def _has_developmental_payload(payload: ScreeningRequest) -> bool:
+    keys = {str(k).strip().upper() for k in (payload.domain_responses or {}).keys()}
+    return any(k in {"GM", "FM", "LC", "COG", "SE"} for k in keys)
+
+
 def _age_band(age_months: int) -> str:
     if age_months <= 12:
         return "0-12"
@@ -741,6 +1697,15 @@ def _parse_date_safe(value: str | None) -> date | None:
             return None
 
 
+def _normalize_gender(value: Optional[str]) -> str:
+    raw = (value or "").strip().lower()
+    if raw in {"m", "male"}:
+        return "M"
+    if raw in {"f", "female"}:
+        return "F"
+    return ""
+
+
 def _child_row_with_aliases(row: Any) -> Dict[str, Any]:
     data = dict(row)
     awc_code = _normalize_awc_code(str(data.get("awc_code") or data.get("awc_id") or ""), prefer_prefix="AWW")
@@ -751,24 +1716,98 @@ def _child_row_with_aliases(row: Any) -> Dict[str, Any]:
     data["sector_id"] = str(data.get("sector_id") or mandal)
     data["mandal_id"] = str(data.get("mandal_id") or mandal)
     data["district_id"] = str(data.get("district_id") or district)
+    data["gender"] = _normalize_gender(str(data.get("gender") or ""))
     data.setdefault("child_name", "")
-    data.setdefault("gender", "")
     data.setdefault("village", "")
     data.setdefault("age_months", 0)
     return data
 
 
+def _resolve_screening_awc_code(conn: Any, payload: ScreeningRequest) -> str:
+    # 1) Explicit AWC from payload always wins. Do not override it using old rows.
+    explicit_awc = _normalize_awc_code(
+        str(payload.awc_code or payload.awc_id or ""),
+        prefer_prefix="AWW",
+    )
+    if explicit_awc:
+        return explicit_awc
+
+    # 2) Accept aww_id as fallback only when it is actually AWC-shaped.
+    aww_fallback = _normalize_awc_code(str(payload.aww_id or ""), prefer_prefix="AWW")
+    if _AWC_DEMO_PATTERN.fullmatch(aww_fallback):
+        return aww_fallback
+
+    # 3) Last fallback: infer from existing child rows.
+    child_awc_rows = conn.execute(
+        """
+        SELECT DISTINCT UPPER(BTRIM(COALESCE(awc_code, ''))) AS awc_code
+        FROM child_profile
+        WHERE child_id = %s
+          AND COALESCE(BTRIM(awc_code), '') <> ''
+        ORDER BY UPPER(BTRIM(COALESCE(awc_code, '')))
+        """,
+        (payload.child_id,),
+    ).fetchall()
+    child_awc_codes = [
+        _normalize_awc_code(str(row.get("awc_code") or ""), prefer_prefix="AWW")
+        for row in child_awc_rows
+    ]
+    child_awc_codes = [code for code in child_awc_codes if code]
+    if not child_awc_codes:
+        return ""
+    return child_awc_codes[0]
+
+
 def _save_screening(db_path: str, payload: ScreeningRequest, result: ScreeningResponse) -> None:
     created_at = datetime.utcnow().isoformat()
-    awc_code = _normalize_awc_code(payload.awc_id or payload.aww_id or "", prefer_prefix="AWW")
     with _get_conn(db_path) as conn:
+        awc_code = _resolve_screening_awc_code(conn, payload)
+        awc_variants = _awc_code_variants(awc_code) or ([awc_code] if awc_code else [])
+        if awc_variants:
+            placeholders = ",".join("%s" for _ in awc_variants)
+            existing_child = conn.execute(
+                f"""
+                SELECT dob, gender, awc_code
+                FROM child_profile
+                WHERE child_id = %s
+                  AND UPPER(BTRIM(COALESCE(awc_code, ''))) IN ({placeholders})
+                LIMIT 1
+                """,
+                tuple([payload.child_id, *awc_variants]),
+            ).fetchone()
+        else:
+            existing_child = conn.execute(
+                """
+                SELECT dob, gender, awc_code
+                FROM child_profile
+                WHERE child_id = %s
+                ORDER BY CASE WHEN COALESCE(BTRIM(awc_code), '') = '' THEN 1 ELSE 0 END,
+                         UPPER(BTRIM(COALESCE(awc_code, '')))
+                LIMIT 1
+                """,
+                (payload.child_id,),
+            ).fetchone()
+        safe_dob = None
+        safe_gender = _normalize_gender(payload.gender)
+        if existing_child is not None:
+            safe_dob = str(existing_child.get("dob") or "").strip() or None
+            if not safe_gender:
+                safe_gender = _normalize_gender(str(existing_child.get("gender") or ""))
+            if not awc_code:
+                awc_code = _normalize_awc_code(
+                    str(existing_child.get("awc_code") or ""),
+                    prefer_prefix="AWW",
+                )
+        if not safe_dob:
+            safe_dob = datetime.utcnow().date().isoformat()
         conn.execute(
             """
             INSERT INTO child_profile(
-              child_id, dob, awc_code, district, mandal, assessment_cycle
+              child_id, dob, gender, awc_code, district, mandal, assessment_cycle
             )
-            VALUES(%s,%s,%s,%s,%s,%s)
+            VALUES(%s,%s,%s,%s,%s,%s,%s)
             ON CONFLICT(child_id, awc_code) DO UPDATE SET
+              gender=COALESCE(NULLIF(excluded.gender, ''), child_profile.gender),
               mandal=COALESCE(NULLIF(excluded.mandal, ''), child_profile.mandal),
               district=COALESCE(NULLIF(excluded.district, ''), child_profile.district),
               assessment_cycle=COALESCE(NULLIF(excluded.assessment_cycle, ''), child_profile.assessment_cycle),
@@ -776,7 +1815,8 @@ def _save_screening(db_path: str, payload: ScreeningRequest, result: ScreeningRe
             """,
             (
                 payload.child_id,
-                None,
+                safe_dob,
+                safe_gender,
                 awc_code,
                 payload.district or "",
                 payload.mandal or "",
@@ -785,12 +1825,13 @@ def _save_screening(db_path: str, payload: ScreeningRequest, result: ScreeningRe
         )
         cur = conn.execute(
             """
-            INSERT INTO screening_event(child_id, age_months, overall_risk, explainability, assessment_cycle, created_at)
-            VALUES(%s,%s,%s,%s,%s,%s)
+            INSERT INTO screening_event(child_id, awc_code, age_months, overall_risk, explainability, assessment_cycle, created_at)
+            VALUES(%s,%s,%s,%s,%s,%s,%s)
             RETURNING id
             """,
             (
                 payload.child_id,
+                awc_code,
                 payload.age_months,
                 _normalize_risk(result.risk_level),
                 "; ".join(result.explanation),
@@ -809,8 +1850,116 @@ def _save_screening(db_path: str, payload: ScreeningRequest, result: ScreeningRe
                 (screening_id, domain, _normalize_risk(risk), _risk_score(risk)),
             )
 
+        delay_summary = result.delay_summary or {}
+        gm_delay = int(delay_summary.get("GM_delay", 0) or 0)
+        fm_delay = int(delay_summary.get("FM_delay", 0) or 0)
+        lc_delay = int(delay_summary.get("LC_delay", 0) or 0)
+        cog_delay = int(delay_summary.get("COG_delay", 0) or 0)
+        se_delay = int(delay_summary.get("SE_delay", 0) or 0)
+        num_delays = gm_delay + fm_delay + lc_delay + cog_delay + se_delay
+
+        if screening_id and _has_developmental_payload(payload):
+            conn.execute(
+                """
+                INSERT INTO developmental_risk_score(
+                  screening_id, child_id, awc_code, age_months,
+                  gm_delay, fm_delay, lc_delay, cog_delay, se_delay, num_delays,
+                  created_at
+                )
+                VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                (
+                    screening_id,
+                    payload.child_id,
+                    awc_code,
+                    payload.age_months,
+                    gm_delay,
+                    fm_delay,
+                    lc_delay,
+                    cog_delay,
+                    se_delay,
+                    num_delays,
+                    created_at,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO domain_delay_table(
+                  screening_id, child_id, awc_code, age_months,
+                  gm_delay, fm_delay, lc_delay, cog_delay, se_delay, num_delays,
+                  created_at
+                )
+                VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT(screening_id) DO UPDATE SET
+                  child_id = EXCLUDED.child_id,
+                  awc_code = COALESCE(NULLIF(EXCLUDED.awc_code, ''), domain_delay_table.awc_code),
+                  age_months = EXCLUDED.age_months,
+                  gm_delay = EXCLUDED.gm_delay,
+                  fm_delay = EXCLUDED.fm_delay,
+                  lc_delay = EXCLUDED.lc_delay,
+                  cog_delay = EXCLUDED.cog_delay,
+                  se_delay = EXCLUDED.se_delay,
+                  num_delays = EXCLUDED.num_delays,
+                  created_at = EXCLUDED.created_at
+                """,
+                (
+                    screening_id,
+                    payload.child_id,
+                    awc_code,
+                    payload.age_months,
+                    gm_delay,
+                    fm_delay,
+                    lc_delay,
+                    cog_delay,
+                    se_delay,
+                    num_delays,
+                    created_at,
+                ),
+            )
+            conn.execute(
+                """
+                SELECT upsert_anganwadi_developmental_risk(
+                  %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                )
+                """,
+                (
+                    awc_code,
+                    payload.child_id,
+                    screening_id,
+                    payload.age_months,
+                    gm_delay,
+                    fm_delay,
+                    lc_delay,
+                    cog_delay,
+                    se_delay,
+                    num_delays,
+                    created_at,
+                ),
+            )
+
+        neuro_risks = _extract_neuro_risk_labels(result.domain_scores or {})
+        if neuro_risks is not None:
+            conn.execute(
+                """
+                INSERT INTO neuro_logical_risk(
+                  child_id, autism_risk, adhd_risk, behavioral_risk
+                )
+                VALUES(%s,%s,%s,%s)
+                ON CONFLICT(child_id) DO UPDATE SET
+                  autism_risk = EXCLUDED.autism_risk,
+                  adhd_risk = EXCLUDED.adhd_risk,
+                  behavioral_risk = EXCLUDED.behavioral_risk
+                """,
+                (
+                    payload.child_id,
+                    neuro_risks["autism_risk"],
+                    neuro_risks["adhd_risk"],
+                    neuro_risks["behavioral_risk"],
+                ),
+            )
+
         # Create/refresh a follow-up row so Problem D can start tracking outcomes.
-        delay_months = int((result.delay_summary or {}).get("num_delays", 0)) * 2
+        delay_months = int(num_delays) * 2
         existing = conn.execute(
             """
             SELECT id FROM followup_outcome
@@ -1625,6 +2774,31 @@ def create_app() -> FastAPI:
         artifacts = load_artifacts(model_dir)
     except Exception as exc:
         model_load_error = str(exc)
+
+    domain_models = None
+    domain_model_load_error: Optional[str] = None
+    domain_model_dir = os.getenv("ECD_DOMAIN_MODEL_DIR")
+    try:
+        domain_models = load_domain_models(domain_model_dir)
+    except Exception as exc:
+        domain_model_load_error = str(exc)
+
+    neuro_behavior_models = None
+    neuro_behavior_model_load_error: Optional[str] = None
+    neuro_behavior_model_dir = os.getenv("ECD_NEURO_MODEL_DIR")
+    try:
+        neuro_behavior_models = load_neuro_behavior_models(neuro_behavior_model_dir)
+    except Exception as exc:
+        neuro_behavior_model_load_error = str(exc)
+
+    nutrition_model = None
+    nutrition_model_load_error: Optional[str] = None
+    nutrition_model_dir = os.getenv("ECD_NUTRITION_MODEL_DIR")
+    try:
+        nutrition_model = load_nutrition_model(nutrition_model_dir)
+    except Exception as exc:
+        nutrition_model_load_error = str(exc)
+
     db_path = os.getenv(
         "ECD_DATABASE_URL",
         os.getenv("DATABASE_URL", DEFAULT_ECD_DATABASE_URL),
@@ -1648,21 +2822,260 @@ def create_app() -> FastAPI:
     # In-memory referral status override (referral_id -> status)
     referral_status_store: Dict[str, str] = {}
 
+    def _is_neuro_behavioral_payload(payload: ScreeningRequest) -> bool:
+        keys = {str(k).strip().upper() for k in (payload.domain_responses or {}).keys()}
+        has_bps = any(k in {"BPS_AUT", "BPS_ADHD", "BPS_BEH"} for k in keys)
+        has_developmental = any(k in {"GM", "FM", "LC", "COG", "SE"} for k in keys)
+        return has_bps and not has_developmental
+
+    def _predict_screening_result(payload: ScreeningRequest) -> Dict[str, Any]:
+        if _is_neuro_behavioral_payload(payload):
+            if neuro_behavior_models is not None:
+                return predict_neuro_behavioral_risks(payload.model_dump(), neuro_behavior_models)
+
+            # Fallback heuristic for neuro-behavioral payloads when model files are unavailable.
+            domain_scores = {}
+            explanation = []
+            for domain in ["BPS_AUT", "BPS_ADHD", "BPS_BEH"]:
+                answers = payload.domain_responses.get(domain, [])
+                if not isinstance(answers, list):
+                    answers = []
+                misses = sum(1 for v in answers if int(v) == 0)
+                ratio = misses / max(len(answers), 1)
+                if ratio >= 0.60:
+                    label = "High"
+                elif ratio >= 0.30:
+                    label = "Medium"
+                else:
+                    label = "Low"
+                domain_scores[domain] = label
+                explanation.append(f"{domain}: {label.lower()} heuristic risk")
+
+            if any(v == "High" for v in domain_scores.values()):
+                risk_level = "High"
+            elif any(v == "Medium" for v in domain_scores.values()):
+                risk_level = "Medium"
+            else:
+                risk_level = "Low"
+
+            delay_summary = {
+                f"{d}_delay": 1 if domain_scores.get(d, "Low") in {"Medium", "High", "Critical"} else 0
+                for d in ["BPS_AUT", "BPS_ADHD", "BPS_BEH"]
+            }
+            delay_summary["num_delays"] = sum(delay_summary.values())
+            if neuro_behavior_model_load_error:
+                explanation.append(
+                    "Neuro behavioral models not loaded; using fallback heuristic engine."
+                )
+            return {
+                "risk_level": risk_level,
+                "domain_scores": domain_scores,
+                "explanation": explanation,
+                "delay_summary": delay_summary,
+                "model_source": "fallback_heuristic",
+            }
+
+        if domain_models is not None:
+            result = predict_domain_delays(payload.model_dump(), domain_models)
+            if model_load_error:
+                explanation = list(result.get("explanation") or [])
+                explanation.append(
+                    "Using domain delay models because combined risk model is unavailable."
+                )
+                result["explanation"] = explanation
+            return result
+
+        if artifacts is not None:
+            return predict_risk(payload.model_dump(), artifacts)
+
+        # Fallback heuristic when model artifacts are unavailable.
+        domain_scores = {}
+        explanation = []
+        total_delay_flags = 0
+        for domain, answers in payload.domain_responses.items():
+            misses = sum(1 for v in answers if int(v) == 0)
+            ratio = misses / max(len(answers), 1)
+            if ratio >= 0.75:
+                label = "critical"
+            elif ratio >= 0.5:
+                label = "high"
+            elif ratio >= 0.25:
+                label = "medium"
+            else:
+                label = "low"
+            domain_scores[domain] = label
+            if label in {"critical", "high", "medium"}:
+                total_delay_flags += 1
+            explanation.append(f"{domain}: {label}")
+        if total_delay_flags >= 3:
+            risk_level = "critical"
+        elif total_delay_flags == 2:
+            risk_level = "high"
+        elif total_delay_flags == 1:
+            risk_level = "medium"
+        else:
+            risk_level = "low"
+        delay_summary = {
+            f"{d}_delay": 1
+            if domain_scores.get(d, "low") in {"critical", "high", "medium"}
+            else 0
+            for d in ["GM", "FM", "LC", "COG", "SE"]
+        }
+        delay_summary["num_delays"] = sum(delay_summary.values())
+        if model_load_error:
+            explanation.append("Using fallback risk engine due to model load issue.")
+        if domain_model_load_error:
+            explanation.append(
+                "Domain models not loaded; using fallback heuristic engine."
+            )
+        return {
+            "risk_level": risk_level,
+            "domain_scores": domain_scores,
+            "explanation": explanation,
+            "delay_summary": delay_summary,
+        }
+
+    def _fallback_nutrition_risk(features: Dict[str, Any]) -> Dict[str, Any]:
+        def _to_float(value: Any) -> Optional[float]:
+            if value is None:
+                return None
+            if isinstance(value, bool):
+                return 1.0 if value else 0.0
+            try:
+                return float(value)
+            except Exception:
+                return None
+
+        def _to_bool(value: Any) -> bool:
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, (int, float)):
+                return float(value) != 0.0
+            text = str(value or "").strip().lower()
+            return text in {"1", "true", "yes", "y"}
+
+        score = 0
+        edema = _to_bool(features.get("bilateral_edema"))
+        if edema:
+            score += 4
+        muac = _to_float(features.get("muac_cm"))
+        if muac is not None:
+            if muac < 11.5:
+                score += 4
+            elif muac < 12.5:
+                score += 2
+        hb = _to_float(features.get("hemoglobin_gdl"))
+        if hb is not None:
+            if hb < 7:
+                score += 4
+            elif hb < 11:
+                score += 2
+        weight = _to_float(features.get("weight_kg"))
+        height = _to_float(features.get("height_cm"))
+        if weight is not None and weight <= 0:
+            score += 1
+        if height is not None and height <= 0:
+            score += 1
+        if _to_bool(features.get("low_birth_weight")):
+            score += 1
+        if _to_bool(features.get("recent_illness")):
+            score += 1
+        if _to_bool(features.get("poor_appetite")):
+            score += 1
+        if _to_bool(features.get("diarrhea")):
+            score += 1
+        if _to_bool(features.get("vomiting")):
+            score += 1
+        if _to_bool(features.get("convulsions")):
+            score += 3
+
+        if score >= 8:
+            risk = "High"
+        elif score >= 4:
+            risk = "Medium"
+        else:
+            risk = "Low"
+
+        confidence = min(0.95, 0.55 + (score / 20.0))
+        return {
+            "nutrition_risk": risk,
+            "confidence": float(round(confidence, 4)),
+            "class_probabilities": {},
+            "model_source": "nutrition_fallback_rules",
+        }
+
+    def _problem_b_status_display(raw_status: str) -> str:
+        normalized = str(raw_status or "").strip().lower().replace("_", " ")
+        if normalized in {"pending"}:
+            return "Pending"
+        if normalized in {"appointment scheduled", "scheduled"}:
+            return "Appointment Scheduled"
+        if normalized in {"under treatment", "undertreatment", "visited"}:
+            return "Under Treatment"
+        if normalized in {"completed"}:
+            return "Completed"
+        if normalized in {"missed"}:
+            return "Missed"
+        return "Pending"
+
+    def _problem_b_status_rank(status: str) -> int:
+        normalized = _problem_b_status_display(status)
+        return {
+            "Pending": 0,
+            "Appointment Scheduled": 1,
+            "Under Treatment": 2,
+            "Missed": 2,
+            "Completed": 3,
+        }.get(normalized, 0)
+
+    def _problem_b_status_from_db(referral_id: str) -> Optional[str]:
+        with _get_conn(db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT referral_status
+                FROM referral_action
+                WHERE referral_id = %s
+                LIMIT 1
+                """,
+                (referral_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return _problem_b_status_display(str(row["referral_status"] or ""))
+
     def _suggested_referral_status(referral_id: str) -> str:
+        db_status = _problem_b_status_from_db(referral_id)
         appointments = appointments_store.get(referral_id, [])
         if not appointments:
-            return "Pending"
-        completed = sum(1 for a in appointments if a.get("status") == "COMPLETED")
+            return db_status or "Pending"
+
+        completed = sum(1 for a in appointments if str(a.get("status") or "").upper() == "COMPLETED")
         if completed == 0:
-            return "Appointment Scheduled"
-        if completed >= 1 and len(appointments) == 1:
+            suggested = "Appointment Scheduled"
+        elif completed >= 1 and len(appointments) == 1:
+            suggested = "Completed"
+        elif len(appointments) > 1:
+            suggested = "Under Treatment"
+        else:
+            suggested = "Appointment Scheduled"
+
+        if not db_status:
+            return suggested
+        if db_status == "Completed":
             return "Completed"
-        if len(appointments) > 1:
-            return "Under Treatment"
-        return "Appointment Scheduled"
+        if db_status == "Missed" and suggested in {"Pending", "Appointment Scheduled"}:
+            return "Missed"
+        if _problem_b_status_rank(db_status) > _problem_b_status_rank(suggested):
+            return db_status
+        return suggested
 
     def _current_referral_status(referral_id: str) -> str:
-        return referral_status_store.get(referral_id, _suggested_referral_status(referral_id))
+        if referral_id in referral_status_store:
+            return _problem_b_status_display(referral_status_store[referral_id])
+        db_status = _problem_b_status_from_db(referral_id)
+        if db_status:
+            return db_status
+        return _suggested_referral_status(referral_id)
 
     def _phase_payload(child_id: str) -> Dict:
         rows = activity_tracking_store.get(child_id, [])
@@ -1893,6 +3306,7 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="child_id is required")
 
         dob = (payload.date_of_birth or payload.dob or "").strip() or None
+        gender = _normalize_gender(payload.gender)
         awc_code = _normalize_awc_code(payload.awc_id or payload.awc_code or "", prefer_prefix="AWW") or "AWW_DEMO_001"
         district = (payload.district_id or payload.district or "").strip() or ""
         mandal = (payload.mandal_id or payload.mandal or "").strip() or ""
@@ -1924,13 +3338,14 @@ def create_app() -> FastAPI:
                 conn.execute(
                     """
                     INSERT INTO child_profile(
-                      child_id, dob, awc_code, district, mandal, assessment_cycle
+                      child_id, dob, gender, awc_code, district, mandal, assessment_cycle
                     )
-                    VALUES(%s, %s, %s, %s, %s, %s)
+                    VALUES(%s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         child_id,
                         dob,
+                        gender,
                         awc_code,
                         district,
                         mandal,
@@ -1940,7 +3355,7 @@ def create_app() -> FastAPI:
 
                 row = conn.execute(
                     """
-                    SELECT child_id, dob, awc_code, district, mandal, assessment_cycle
+                    SELECT child_id, dob, gender, awc_code, district, mandal, assessment_cycle
                     FROM child_profile
                     WHERE child_id = %s AND awc_code = %s
                     LIMIT 1
@@ -1967,17 +3382,53 @@ def create_app() -> FastAPI:
                 SELECT
                     c.child_id,
                     c.dob,
+                    c.gender,
                     c.awc_code,
                     c.mandal,
                     c.district,
                     c.assessment_cycle,
-                    se.age_months
+                    se.age_months,
+                    EXISTS(
+                        SELECT 1
+                        FROM screening_event sx
+                        WHERE sx.child_id = c.child_id
+                          AND EXISTS(
+                            SELECT 1
+                            FROM screening_domain_score sdx
+                            WHERE sdx.screening_id = sx.id
+                              AND UPPER(BTRIM(COALESCE(sdx.domain, ''))) IN ('GM', 'FM', 'LC', 'COG', 'SE')
+                          )
+                          AND REGEXP_REPLACE(
+                                UPPER(BTRIM(COALESCE(sx.awc_code, ''))),
+                                '^(AWW|AWS)_DEMO_|^DEMO_(AWW|AWS)_',
+                                'DEMO_'
+                              ) = REGEXP_REPLACE(
+                                UPPER(BTRIM(COALESCE(c.awc_code, ''))),
+                                '^(AWW|AWS)_DEMO_|^DEMO_(AWW|AWS)_',
+                                'DEMO_'
+                              )
+                    ) AS has_screening
                 FROM child_profile c
                 LEFT JOIN LATERAL (
-                    SELECT age_months
-                    FROM screening_event s
-                    WHERE s.child_id = c.child_id
-                    ORDER BY s.created_at DESC, s.id DESC
+                    SELECT sx.age_months
+                    FROM screening_event sx
+                        WHERE sx.child_id = c.child_id
+                          AND EXISTS(
+                            SELECT 1
+                            FROM screening_domain_score sdx
+                            WHERE sdx.screening_id = sx.id
+                              AND UPPER(BTRIM(COALESCE(sdx.domain, ''))) IN ('GM', 'FM', 'LC', 'COG', 'SE')
+                          )
+                          AND REGEXP_REPLACE(
+                                UPPER(BTRIM(COALESCE(sx.awc_code, ''))),
+                                '^(AWW|AWS)_DEMO_|^DEMO_(AWW|AWS)_',
+                                'DEMO_'
+                              ) = REGEXP_REPLACE(
+                                UPPER(BTRIM(COALESCE(c.awc_code, ''))),
+                                '^(AWW|AWS)_DEMO_|^DEMO_(AWW|AWS)_',
+                                'DEMO_'
+                              )
+                    ORDER BY sx.created_at DESC, sx.id DESC
                     LIMIT 1
                 ) se ON TRUE
                 WHERE c.child_id = %s
@@ -2002,6 +3453,7 @@ def create_app() -> FastAPI:
             "district_id": child.get("district_id") or "",
             "district": child.get("district") or "",
             "assessment_cycle": child.get("assessment_cycle") or "Baseline",
+            "has_screening": bool(child.get("has_screening") or False),
             "created_at": None,
             "updated_at": None,
         }
@@ -2023,17 +3475,53 @@ def create_app() -> FastAPI:
                 SELECT
                     c.child_id,
                     c.dob,
+                    c.gender,
                     c.awc_code,
                     c.mandal,
                     c.district,
                     c.assessment_cycle,
-                    se.age_months
+                    se.age_months,
+                    EXISTS(
+                        SELECT 1
+                        FROM screening_event sx
+                        WHERE sx.child_id = c.child_id
+                          AND EXISTS(
+                            SELECT 1
+                            FROM screening_domain_score sdx
+                            WHERE sdx.screening_id = sx.id
+                              AND UPPER(BTRIM(COALESCE(sdx.domain, ''))) IN ('GM', 'FM', 'LC', 'COG', 'SE')
+                          )
+                          AND REGEXP_REPLACE(
+                                UPPER(BTRIM(COALESCE(sx.awc_code, ''))),
+                                '^(AWW|AWS)_DEMO_|^DEMO_(AWW|AWS)_',
+                                'DEMO_'
+                              ) = REGEXP_REPLACE(
+                                UPPER(BTRIM(COALESCE(c.awc_code, ''))),
+                                '^(AWW|AWS)_DEMO_|^DEMO_(AWW|AWS)_',
+                                'DEMO_'
+                              )
+                    ) AS has_screening
                 FROM child_profile c
                 LEFT JOIN LATERAL (
-                    SELECT age_months
-                    FROM screening_event s
-                    WHERE s.child_id = c.child_id
-                    ORDER BY s.created_at DESC, s.id DESC
+                    SELECT sx.age_months
+                    FROM screening_event sx
+                        WHERE sx.child_id = c.child_id
+                          AND EXISTS(
+                            SELECT 1
+                            FROM screening_domain_score sdx
+                            WHERE sdx.screening_id = sx.id
+                              AND UPPER(BTRIM(COALESCE(sdx.domain, ''))) IN ('GM', 'FM', 'LC', 'COG', 'SE')
+                          )
+                          AND REGEXP_REPLACE(
+                                UPPER(BTRIM(COALESCE(sx.awc_code, ''))),
+                                '^(AWW|AWS)_DEMO_|^DEMO_(AWW|AWS)_',
+                                'DEMO_'
+                              ) = REGEXP_REPLACE(
+                                UPPER(BTRIM(COALESCE(c.awc_code, ''))),
+                                '^(AWW|AWS)_DEMO_|^DEMO_(AWW|AWS)_',
+                                'DEMO_'
+                              )
+                    ORDER BY sx.created_at DESC, sx.id DESC
                     LIMIT 1
                 ) se ON TRUE
                 {where_sql}
@@ -2059,54 +3547,347 @@ def create_app() -> FastAPI:
                     "district_id": child.get("district_id") or "",
                     "district": child.get("district") or "",
                     "assessment_cycle": child.get("assessment_cycle") or "Baseline",
+                    "has_screening": bool(child.get("has_screening") or False),
                     "created_at": None,
                     "updated_at": None,
                 }
             )
         return {"count": len(items), "items": items}
 
+    @app.delete("/children/{child_id}")
+    def delete_child(child_id: str, awc_code: Optional[str] = None) -> dict:
+        target_child_id = (child_id or "").strip()
+        if not target_child_id:
+            raise HTTPException(status_code=400, detail="child_id is required")
+
+        awc_variants = _awc_code_variants(awc_code)
+        where_sql = "child_id = %s"
+        where_params: List[Any] = [target_child_id]
+        if awc_variants:
+            placeholders = ",".join("%s" for _ in awc_variants)
+            where_sql += f" AND UPPER(BTRIM(awc_code)) IN ({placeholders})"
+            where_params.extend(awc_variants)
+
+        with _get_conn(db_path) as conn:
+            def _resolve_nutrition_tables(codes: Optional[List[str]] = None) -> List[str]:
+                table_names: List[str] = []
+                if codes:
+                    try:
+                        for code in codes:
+                            row = conn.execute(
+                                "SELECT anganwadi_nutrition_table_name(%s) AS table_name",
+                                (code,),
+                            ).fetchone()
+                            table_name = str((row or {}).get("table_name") or "").strip()
+                            if re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", table_name):
+                                table_names.append(table_name)
+                    except Exception:
+                        return _resolve_nutrition_tables(None)
+                else:
+                    rows = conn.execute(
+                        """
+                        SELECT table_name
+                        FROM information_schema.tables
+                        WHERE table_schema = 'public'
+                          AND table_name LIKE 'nutrition_result_awc_%'
+                        """
+                    ).fetchall()
+                    for row in rows:
+                        table_name = str(row.get("table_name") or "").strip()
+                        if re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", table_name):
+                            table_names.append(table_name)
+                # Preserve order while removing duplicates.
+                return list(dict.fromkeys(table_names))
+
+            existing_row = conn.execute(
+                f"""
+                SELECT 1
+                FROM child_profile
+                WHERE {where_sql}
+                LIMIT 1
+                """,
+                tuple(where_params),
+            ).fetchone()
+            if existing_row is None:
+                raise HTTPException(status_code=404, detail="Child not found")
+
+            deleted_profiles = conn.execute(
+                f"DELETE FROM child_profile WHERE {where_sql}",
+                tuple(where_params),
+            ).rowcount
+
+            screening_where_sql = "child_id = %s"
+            screening_where_params: List[Any] = [target_child_id]
+            if awc_variants:
+                screening_placeholders = ",".join("%s" for _ in awc_variants)
+                screening_where_sql += (
+                    " AND ("
+                    f"UPPER(BTRIM(COALESCE(awc_code, ''))) IN ({screening_placeholders}) "
+                    "OR COALESCE(BTRIM(awc_code), '') = ''"
+                    ")"
+                )
+                screening_where_params.extend(awc_variants)
+
+            screening_rows = conn.execute(
+                f"""
+                SELECT id
+                FROM screening_event
+                WHERE {screening_where_sql}
+                """,
+                tuple(screening_where_params),
+            ).fetchall()
+            screening_ids = [
+                int(r.get("id"))
+                for r in screening_rows
+                if r.get("id") is not None
+            ]
+            if screening_ids:
+                scoring_placeholders = ",".join("%s" for _ in screening_ids)
+                conn.execute(
+                    f"DELETE FROM screening_domain_score WHERE screening_id IN ({scoring_placeholders})",
+                    tuple(screening_ids),
+                )
+                conn.execute(
+                    f"DELETE FROM developmental_risk_score WHERE screening_id IN ({scoring_placeholders})",
+                    tuple(screening_ids),
+                )
+                conn.execute(
+                    f"DELETE FROM domain_delay_table WHERE screening_id IN ({scoring_placeholders})",
+                    tuple(screening_ids),
+                )
+            conn.execute(
+                "DELETE FROM neuro_logical_risk WHERE child_id = %s",
+                (target_child_id,),
+            )
+            deleted_screenings = conn.execute(
+                f"DELETE FROM screening_event WHERE {screening_where_sql}",
+                tuple(screening_where_params),
+            ).rowcount
+
+            deleted_nutrition = 0
+            nutrition_where_sql = "child_id = %s"
+            nutrition_where_params: List[Any] = [target_child_id]
+            if awc_variants:
+                nutrition_placeholders = ",".join("%s" for _ in awc_variants)
+                nutrition_where_sql += (
+                    f" AND UPPER(BTRIM(COALESCE(awc_code, ''))) IN ({nutrition_placeholders})"
+                )
+                nutrition_where_params.extend(awc_variants)
+            deleted_nutrition += conn.execute(
+                f"DELETE FROM nutrition_result WHERE {nutrition_where_sql}",
+                tuple(nutrition_where_params),
+            ).rowcount
+            for table_name in _resolve_nutrition_tables(awc_variants or None):
+                deleted_nutrition += conn.execute(
+                    f"DELETE FROM {table_name} WHERE child_id = %s",
+                    (target_child_id,),
+                ).rowcount
+
+            remaining_row = conn.execute(
+                """
+                SELECT COUNT(*) AS remaining_count
+                FROM child_profile
+                WHERE child_id = %s
+                """,
+                (target_child_id,),
+            ).fetchone()
+            remaining_count = int((remaining_row or {}).get("remaining_count") or 0)
+
+            deleted_scope = "profile_only"
+            if remaining_count == 0:
+                deleted_scope = "profile_and_related_records"
+
+                referral_rows = conn.execute(
+                    """
+                    SELECT referral_id
+                    FROM referral_action
+                    WHERE child_id = %s
+                    """,
+                    (target_child_id,),
+                ).fetchall()
+                referral_ids = [
+                    str(r.get("referral_id") or "").strip()
+                    for r in referral_rows
+                    if str(r.get("referral_id") or "").strip()
+                ]
+                if referral_ids:
+                    referral_placeholders = ",".join("%s" for _ in referral_ids)
+                    conn.execute(
+                        f"DELETE FROM follow_up_log WHERE referral_id IN ({referral_placeholders})",
+                        tuple(referral_ids),
+                    )
+                    conn.execute(
+                        f"DELETE FROM follow_up_activities WHERE referral_id IN ({referral_placeholders})",
+                        tuple(referral_ids),
+                    )
+                    conn.execute(
+                        f"DELETE FROM referral_status_history WHERE referral_id IN ({referral_placeholders})",
+                        tuple(referral_ids),
+                    )
+
+                conn.execute(
+                    "DELETE FROM referral_action WHERE child_id = %s",
+                    (target_child_id,),
+                )
+                conn.execute(
+                    "DELETE FROM developmental_risk_score WHERE child_id = %s",
+                    (target_child_id,),
+                )
+                conn.execute(
+                    "DELETE FROM domain_delay_table WHERE child_id = %s",
+                    (target_child_id,),
+                )
+                conn.execute(
+                    "DELETE FROM followup_outcome WHERE child_id = %s",
+                    (target_child_id,),
+                )
+                if awc_variants:
+                    deleted_nutrition += conn.execute(
+                        "DELETE FROM nutrition_result WHERE child_id = %s",
+                        (target_child_id,),
+                    ).rowcount
+                    for table_name in _resolve_nutrition_tables():
+                        deleted_nutrition += conn.execute(
+                            f"DELETE FROM {table_name} WHERE child_id = %s",
+                            (target_child_id,),
+                        ).rowcount
+
+        return {
+            "status": "ok",
+            "child_id": target_child_id,
+            "deleted_profiles": int(deleted_profiles or 0),
+            "deleted_screenings": int(deleted_screenings or 0),
+            "deleted_nutrition_records": int(deleted_nutrition or 0),
+            "deleted_scope": deleted_scope,
+        }
+
+    @app.post("/screening/predict-domain-delays")
+    def predict_domain_delays_for_screen(payload: ScreeningRequest) -> dict:
+        result = _predict_screening_result(payload)
+        return {
+            "status": "ok",
+            "risk_level": str(result.get("risk_level", "low")),
+            "domain_scores": dict(result.get("domain_scores") or {}),
+            "explanation": list(result.get("explanation") or []),
+            "delay_summary": dict(result.get("delay_summary") or {}),
+            "model_source": str(result.get("model_source") or ""),
+        }
+
+    @app.post("/nutrition/predict-risk")
+    def predict_nutrition_risk_for_screen(payload: NutritionPredictRequest) -> dict:
+        features = dict(payload.features or {})
+        features.setdefault("age_months", payload.age_months)
+
+        if nutrition_model is not None:
+            try:
+                result = predict_nutrition_risk_ml(features, nutrition_model)
+                return {"status": "ok", **result}
+            except Exception as exc:
+                fallback = _fallback_nutrition_risk(features)
+                fallback["status"] = "ok"
+                fallback["warning"] = f"Nutrition model prediction failed; fallback used: {exc}"
+                return fallback
+
+        fallback = _fallback_nutrition_risk(features)
+        fallback["status"] = "ok"
+        if nutrition_model_load_error:
+            fallback["warning"] = (
+                "Nutrition model unavailable; fallback rules used: "
+                f"{nutrition_model_load_error}"
+            )
+        return fallback
+
+    @app.post("/nutrition/submit")
+    def submit_nutrition_result(payload: NutritionSubmitRequest) -> dict:
+        child_id = str(payload.child_id or "").strip()
+        if not child_id:
+            raise HTTPException(status_code=400, detail="child_id is required")
+
+        awc_code = _normalize_awc_code(
+            payload.awc_code or payload.aww_id or "",
+            prefer_prefix="AWW",
+        )
+        created_at = datetime.utcnow().isoformat()
+
+        with _get_conn(db_path) as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO nutrition_result(
+                  child_id, awc_code, aww_id, age_months,
+                  waz, haz, whz,
+                  underweight, stunting, wasting, anemia,
+                  nutrition_score, risk_category, created_at
+                )
+                VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT(child_id, awc_code) DO UPDATE SET
+                  aww_id = COALESCE(NULLIF(EXCLUDED.aww_id, ''), nutrition_result.aww_id),
+                  age_months = EXCLUDED.age_months,
+                  waz = EXCLUDED.waz,
+                  haz = EXCLUDED.haz,
+                  whz = EXCLUDED.whz,
+                  underweight = EXCLUDED.underweight,
+                  stunting = EXCLUDED.stunting,
+                  wasting = EXCLUDED.wasting,
+                  anemia = EXCLUDED.anemia,
+                  nutrition_score = EXCLUDED.nutrition_score,
+                  risk_category = EXCLUDED.risk_category,
+                  created_at = EXCLUDED.created_at
+                RETURNING id
+                """,
+                (
+                    child_id,
+                    awc_code,
+                    str(payload.aww_id or "").strip() or None,
+                    int(payload.age_months or 0),
+                    payload.waz,
+                    payload.haz,
+                    payload.whz,
+                    int(payload.underweight or 0),
+                    int(payload.stunting or 0),
+                    int(payload.wasting or 0),
+                    int(payload.anemia or 0),
+                    int(payload.nutrition_score or 0),
+                    _normalize_risk(payload.risk_category),
+                    created_at,
+                ),
+            )
+            row = cur.fetchone()
+            nutrition_id = int(row["id"]) if row and row.get("id") is not None else None
+            conn.execute(
+                """
+                SELECT insert_anganwadi_nutrition_result(
+                  %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                )
+                """,
+                (
+                    awc_code,
+                    child_id,
+                    str(payload.aww_id or "").strip() or None,
+                    int(payload.age_months or 0),
+                    payload.waz,
+                    payload.haz,
+                    payload.whz,
+                    int(payload.underweight or 0),
+                    int(payload.stunting or 0),
+                    int(payload.wasting or 0),
+                    int(payload.anemia or 0),
+                    int(payload.nutrition_score or 0),
+                    _normalize_risk(payload.risk_category),
+                    created_at,
+                ),
+            )
+
+        return {
+            "status": "ok",
+            "id": nutrition_id,
+            "child_id": child_id,
+            "awc_code": awc_code,
+            "risk_category": _normalize_risk(payload.risk_category),
+        }
+
     @app.post("/screening/submit", response_model=ScreeningResponse)
     def submit_screening(payload: ScreeningRequest) -> ScreeningResponse:
-        if artifacts is None:
-            # Fallback heuristic when model artifacts are unavailable.
-            domain_scores = {}
-            explanation = []
-            total_delay_flags = 0
-            for domain, answers in payload.domain_responses.items():
-                misses = sum(1 for v in answers if int(v) == 0)
-                ratio = misses / max(len(answers), 1)
-                if ratio >= 0.75:
-                    label = "critical"
-                elif ratio >= 0.5:
-                    label = "high"
-                elif ratio >= 0.25:
-                    label = "medium"
-                else:
-                    label = "low"
-                domain_scores[domain] = label
-                if label in {"critical", "high", "medium"}:
-                    total_delay_flags += 1
-                explanation.append(f"{domain}: {label}")
-            if total_delay_flags >= 3:
-                risk_level = "critical"
-            elif total_delay_flags == 2:
-                risk_level = "high"
-            elif total_delay_flags == 1:
-                risk_level = "medium"
-            else:
-                risk_level = "low"
-            delay_summary = {f"{d}_delay": 1 if domain_scores.get(d, "low") in {"critical", "high", "medium"} else 0 for d in ["GM", "FM", "LC", "COG", "SE"]}
-            delay_summary["num_delays"] = sum(delay_summary.values())
-            if model_load_error:
-                explanation.append("Using fallback risk engine due to model load issue.")
-            result = {
-                "risk_level": risk_level,
-                "domain_scores": domain_scores,
-                "explanation": explanation,
-                "delay_summary": delay_summary,
-            }
-        else:
-            result = predict_risk(payload.model_dump(), artifacts)
+        result = _predict_screening_result(payload)
         risk_level = str(result.get("risk_level", "low"))
         domain_scores = dict(result.get("domain_scores") or {})
         referral_data = _create_referral_action(
@@ -2188,6 +3969,96 @@ def create_app() -> FastAPI:
         )
         
         return response
+
+    @app.get("/referral/list")
+    def list_referrals(aww_id: str = "", limit: int = 200):
+        normalized_aww = (aww_id or "").strip().upper()
+        safe_limit = max(1, min(int(limit or 200), 1000))
+
+        def _normalized_aww_key(value: str) -> str:
+            raw = (value or "").strip().upper()
+            if not raw:
+                return ""
+            m = re.match(r"^(AWW|AWS)_DEMO_(\d{3,4})$", raw)
+            if m:
+                return f"DEMO_{int(m.group(2))}"
+            m = re.match(r"^DEMO_(AWW|AWS)_(\d{3,4})$", raw)
+            if m:
+                return f"DEMO_{int(m.group(2))}"
+            return raw
+
+        target_key = _normalized_aww_key(normalized_aww)
+        with _get_conn(db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    ra.referral_id,
+                    ra.child_id,
+                    ra.aww_id,
+                    ra.referral_type,
+                    ra.urgency,
+                    ra.referral_status,
+                    ra.referral_date,
+                    ra.followup_deadline,
+                    ra.escalation_level,
+                    ra.escalated_to,
+                    ra.last_updated,
+                    se.overall_risk
+                FROM referral_action ra
+                LEFT JOIN LATERAL (
+                    SELECT overall_risk
+                    FROM screening_event s
+                    WHERE s.child_id = ra.child_id
+                    ORDER BY s.created_at DESC, s.id DESC
+                    LIMIT 1
+                ) se ON TRUE
+                ORDER BY ra.referral_date DESC, ra.referral_id DESC
+                LIMIT %s
+                """,
+                (safe_limit,),
+            ).fetchall()
+
+        if target_key:
+            rows = [
+                r
+                for r in rows
+                if _normalized_aww_key(str(r["aww_id"] or "")) == target_key
+            ]
+
+        items = []
+        for row in rows:
+            severity = _normalize_risk(str(row["overall_risk"] or "Medium"))
+            severity_upper = severity.upper()
+            referral_date = _parse_date_safe(row["referral_date"]) or datetime.utcnow().date()
+            followup_by = _parse_date_safe(row["followup_deadline"]) or (
+                referral_date + timedelta(days=(2 if severity_upper == "CRITICAL" else 10))
+            )
+            urgency = str(row["urgency"] or ("Immediate" if severity_upper == "CRITICAL" else "Priority"))
+
+            if severity_upper == "CRITICAL":
+                referral_type_label = "Immediate Specialist Referral"
+            else:
+                referral_type_label = "Specialist Evaluation"
+
+            items.append(
+                {
+                    "referral_id": row["referral_id"],
+                    "child_id": row["child_id"],
+                    "aww_id": row["aww_id"],
+                    "overall_risk": severity,
+                    "referral_type": row["referral_type"],
+                    "referral_type_label": referral_type_label,
+                    "urgency": urgency,
+                    "status": _status_to_frontend(row["referral_status"]),
+                    "created_on": referral_date.isoformat(),
+                    "followup_by": followup_by.isoformat(),
+                    "escalation_level": int(row["escalation_level"] or 0),
+                    "escalated_to": row["escalated_to"],
+                    "last_updated": row["last_updated"] or referral_date.isoformat(),
+                }
+            )
+
+        return {"count": len(items), "items": items}
 
     @app.get("/referral/by-child/{child_id}")
     def get_referral_by_child(child_id: str):

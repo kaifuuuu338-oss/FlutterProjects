@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:my_first_app/core/localization/app_localizations.dart';
+import 'package:my_first_app/core/navigation/navigation_state_service.dart';
 import 'package:my_first_app/models/child_model.dart';
 import 'package:my_first_app/models/screening_model.dart' as sm;
 import 'package:my_first_app/screens/dashboard_screen.dart';
-import 'package:my_first_app/screens/referral_page.dart';
+import 'package:my_first_app/screens/referral_batch_summary_screen.dart';
 import 'package:my_first_app/screens/settings_screen.dart';
 import 'package:my_first_app/services/local_db_service.dart';
 import 'package:my_first_app/widgets/language_menu_button.dart';
@@ -12,6 +13,8 @@ class ResultScreen extends StatefulWidget {
   final Map<String, double> domainScores;
   final Map<String, String>? domainRiskLevels;
   final Map<String, int>? delaySummary;
+  final int? baselineScore;
+  final String? baselineCategory;
   final String overallRisk;
   final int missedMilestones;
   final String explainability;
@@ -24,6 +27,8 @@ class ResultScreen extends StatefulWidget {
     required this.domainScores,
     this.domainRiskLevels,
     this.delaySummary,
+    this.baselineScore,
+    this.baselineCategory,
     required this.overallRisk,
     required this.missedMilestones,
     required this.explainability,
@@ -38,6 +43,27 @@ class ResultScreen extends StatefulWidget {
 
 class _ResultScreenState extends State<ResultScreen> {
   final LocalDBService _localDb = LocalDBService();
+
+  @override
+  void initState() {
+    super.initState();
+    NavigationStateService.instance.saveState(
+      screen: NavigationStateService.screenResult,
+      args: <String, dynamic>{
+        'child_id': widget.childId,
+        'age_months': widget.ageMonths,
+        'aww_id': widget.awwId,
+        'overall_risk': widget.overallRisk,
+        'missed_milestones': widget.missedMilestones,
+        'explainability': widget.explainability,
+        'baseline_score': widget.baselineScore,
+        'baseline_category': widget.baselineCategory,
+        'domain_scores': widget.domainScores,
+        'domain_risk_levels': widget.domainRiskLevels ?? <String, String>{},
+        'delay_summary': widget.delaySummary ?? <String, int>{},
+      },
+    );
+  }
 
   String _domainStatusText(double v) {
     if (v <= 0.4) return 'Critical';
@@ -76,19 +102,6 @@ class _ResultScreenState extends State<ResultScreen> {
     });
 
     return worstRisk.isEmpty ? 'low' : worstRisk;
-  }
-
-  bool get _shouldShowReferralAction {
-    final overall = _deriveOverallRisk();
-    return overall == 'high' || overall == 'critical' || overall == 'medium';
-  }
-
-  String _referralGuidanceText(AppLocalizations l10n) {
-    final overall = _deriveOverallRisk();
-    if (overall == 'critical' || overall == 'high') {
-      return 'Referral Required';
-    }
-    return 'No referral required';
   }
 
   Color _riskColor(String risk) {
@@ -732,43 +745,36 @@ class _ResultScreenState extends State<ResultScreen> {
             ),
           ),
           const SizedBox(height: 10),
-          if (_shouldShowReferralAction) ...[
-            Container(
-              width: desktop ? 420 : double.infinity,
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFF8E1),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFFFFE082)),
-              ),
-              child: Text(
-                _referralGuidanceText(l10n),
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
-          if (_shouldShowReferralAction)
-            SizedBox(
-              width: desktop ? 420 : double.infinity,
-              child: ElevatedButton.icon(
-                icon: const Icon(Icons.local_hospital),
-                label: const Text('Continue to Referral'),
-                onPressed: () {
-                  Navigator.of(context).pushReplacement(
-                    MaterialPageRoute(
-                      builder: (_) => ReferralPage(
-                        childId: widget.childId,
-                        awwId: widget.awwId,
-                        ageMonths: widget.ageMonths,
-                        overallRisk: widget.overallRisk,
-                        domainScores: widget.domainScores,
-                      ),
+          SizedBox(
+            width: desktop ? 420 : double.infinity,
+            child: ElevatedButton.icon(
+              icon: const Icon(Icons.local_hospital),
+              label: const Text('Continue to Referral'),
+              onPressed: () {
+                Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(
+                    builder: (_) => ReferralBatchSummaryScreen(
+                      childId: widget.childId,
                     ),
-                  );
-                },
-              ),
+                  ),
+                );
+              },
             ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: desktop ? 420 : double.infinity,
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.dashboard_outlined),
+              label: const Text('Back to Dashboard'),
+              onPressed: () {
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (_) => const DashboardScreen()),
+                  (route) => false,
+                );
+              },
+            ),
+          ),
         ],
       ),
     );

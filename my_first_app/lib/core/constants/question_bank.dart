@@ -1,17 +1,281 @@
 class QuestionBank {
+  static const List<String> _domains = ['GM', 'FM', 'LC', 'COG', 'SE'];
+  static const Map<String, int> _sfStartByFineBand = {
+    '0-3': 1,
+    '3-6': 18,
+    '6-9': 32,
+    '9-12': 49,
+    '12-15': 58,
+    '15-18': 65,
+    '18-21': 81,
+    '21-24': 85,
+    '24-27': 95,
+    '27-30': 100,
+    '30-33': 104,
+    '33-36': 110,
+    '36-39': 115,
+    '39-42': 120,
+    '42-45': 125,
+    '45-48': 130,
+    '48-51': 135,
+    '51-54': 140,
+    '54-57': 145,
+    '57-60': 150,
+    '60-63': 155,
+    '63-66': 160,
+    '66-69': 165,
+    '69-72': 170,
+  };
+
+  static const Map<String, List<String>> _cdcGrossMotorByFineBand = {
+    // CDC references provided by user
+    // 0-3 months
+    '0-3': [
+      'CDC-GM-0-3-1: Lifts head during tummy time?',
+      'CDC-GM-0-3-2: Moves arms and legs equally?',
+      'CDC-GM-0-3-3: Holds head up briefly when upright?',
+    ],
+    // 4-6 months (mapped to 3-6)
+    '3-6': [
+      'CDC-GM-3-6-1: Rolls tummy to back?',
+      'CDC-GM-3-6-2: Pushes up on elbows?',
+      'CDC-GM-3-6-3: Holds head steady?',
+      'CDC-GM-3-6-4: Bears weight on legs?',
+    ],
+    // 7-9 months (mapped to 6-9)
+    '6-9': [
+      'CDC-GM-6-9-1: Sits without support?',
+      'CDC-GM-6-9-2: Rolls both directions?',
+      'CDC-GM-6-9-3: Crawls or moves by scooting?',
+      'CDC-GM-6-9-4: Bounces when standing with support?',
+    ],
+    // 10-12 months (mapped to 9-12)
+    '9-12': [
+      'CDC-GM-9-12-1: Pulls to stand?',
+      'CDC-GM-9-12-2: Stands alone?',
+      'CDC-GM-9-12-3: Cruises while holding furniture?',
+      'CDC-GM-9-12-4: Takes independent steps?',
+    ],
+    // 13-18 months (split across 12-15 and 15-18)
+    '12-15': [
+      'CDC-GM-12-15-1: Walks independently?',
+      'CDC-GM-12-15-2: Squats and stands back up?',
+      'CDC-GM-12-15-3: Climbs onto furniture?',
+      'CDC-GM-12-15-4: Walks upstairs with help?',
+    ],
+    '15-18': [
+      'CDC-GM-15-18-1: Walks independently?',
+      'CDC-GM-15-18-2: Squats and stands back up?',
+      'CDC-GM-15-18-3: Climbs onto furniture?',
+      'CDC-GM-15-18-4: Walks upstairs with help?',
+    ],
+    // 19-24 months (split across 18-21 and 21-24)
+    '18-21': [
+      'CDC-GM-18-21-1: Runs?',
+      'CDC-GM-18-21-2: Kicks a ball?',
+      'CDC-GM-18-21-3: Walks up and down stairs holding railing?',
+      'CDC-GM-18-21-4: Jumps with both feet?',
+    ],
+    '21-24': [
+      'CDC-GM-21-24-1: Runs?',
+      'CDC-GM-21-24-2: Kicks a ball?',
+      'CDC-GM-21-24-3: Walks up and down stairs holding railing?',
+      'CDC-GM-21-24-4: Jumps with both feet?',
+    ],
+    // 2-3 years (mapped to 24-36 fine bands)
+    '24-27': [
+      'CDC-GM-24-27-1: Climbs well?',
+      'CDC-GM-24-27-2: Pedals a tricycle?',
+      'CDC-GM-24-27-3: Stands on one foot briefly?',
+    ],
+    '27-30': [
+      'CDC-GM-27-30-1: Climbs well?',
+      'CDC-GM-27-30-2: Pedals a tricycle?',
+      'CDC-GM-27-30-3: Stands on one foot briefly?',
+    ],
+    '30-33': [
+      'CDC-GM-30-33-1: Climbs well?',
+      'CDC-GM-30-33-2: Pedals a tricycle?',
+      'CDC-GM-30-33-3: Stands on one foot briefly?',
+    ],
+    '33-36': [
+      'CDC-GM-33-36-1: Climbs well?',
+      'CDC-GM-33-36-2: Pedals a tricycle?',
+      'CDC-GM-33-36-3: Stands on one foot briefly?',
+    ],
+    // 3-4 years
+    '37-48': [
+      'CDC-GM-37-48-1: Hops on one foot?',
+      'CDC-GM-37-48-2: Catches a large ball?',
+      'CDC-GM-37-48-3: Walks up and down stairs alternating feet?',
+    ],
+    // 4-5 years
+    '49-60': [
+      'CDC-GM-49-60-1: Skips or balances for 5 to 10 seconds?',
+    ],
+    // 5-6 years
+    '61-72': [
+      'CDC-GM-61-72-1: Skips or balances for at least 10 seconds?',
+    ],
+  };
+
   static Map<String, List<String>> byAgeMonths(
     int ageMonths, {
     String languageCode = 'en',
   }) {
     final Map<String, Map<String, List<String>>> bank =
         _banks[languageCode] ?? _banks['en']!;
-    if (ageMonths <= 12) return bank['0-12']!;
+    final fineBandKey = _fineBandKeyForAge(ageMonths);
+    final coarseBandKey = _coarseBandKeyForAge(ageMonths);
+    final selected = bank[fineBandKey] ?? bank[coarseBandKey]!;
+    return _ensureQuestionCountPerDomain(
+      selected,
+      languageBank: bank,
+      fallbackEn: _bankEn,
+      primaryFallbackKey: fineBandKey,
+      includeCdcGrossMotorAnchors: languageCode == 'en',
+      minSfCode: _sfStartByFineBand[fineBandKey],
+      count: 15,
+    );
+  }
+
+  static String _fineBandKeyForAge(int ageMonths) {
+    if (ageMonths < 3) return '0-3';
+    if (ageMonths < 6) return '3-6';
+    if (ageMonths < 9) return '6-9';
+    if (ageMonths < 12) return '9-12';
+    if (ageMonths < 15) return '12-15';
+    if (ageMonths < 18) return '15-18';
+    if (ageMonths < 21) return '18-21';
+    if (ageMonths < 24) return '21-24';
+    if (ageMonths < 27) return '24-27';
+    if (ageMonths < 30) return '27-30';
+    if (ageMonths < 33) return '30-33';
+    if (ageMonths < 36) return '33-36';
+    if (ageMonths < 39) return '36-39';
+    if (ageMonths < 42) return '39-42';
+    if (ageMonths < 45) return '42-45';
+    if (ageMonths < 48) return '45-48';
+    if (ageMonths < 51) return '48-51';
+    if (ageMonths < 54) return '51-54';
+    if (ageMonths < 57) return '54-57';
+    if (ageMonths < 60) return '57-60';
+    if (ageMonths < 63) return '60-63';
+    if (ageMonths < 66) return '63-66';
+    if (ageMonths < 69) return '66-69';
+    return '69-72';
+  }
+
+  static String _coarseBandKeyForAge(int ageMonths) {
+    if (ageMonths <= 12) return '0-12';
     final years = ageMonths ~/ 12;
-    if (years <= 2) return bank['13-24']!; // 13-35 months (1-2 years)
-    if (years == 3) return bank['25-36']!; // 36-47 months
-    if (years == 4) return bank['37-48']!; // 48-59 months (4 years)
-    if (years == 5) return bank['49-60']!; // 60-71 months (5 years)
-    return bank['61-72']!; // 72+ months (6 years)
+    if (years <= 2) return '13-24'; // 13-35 months (1-2 years)
+    if (years == 3) return '25-36'; // 36-47 months
+    if (years == 4) return '37-48'; // 48-59 months (4 years)
+    if (years == 5) return '49-60'; // 60-71 months (5 years)
+    return '61-72'; // 72+ months (6 years)
+  }
+
+  static String _questionKey(String value) => value.trim().toLowerCase();
+  static int? _extractSfNumber(String value) {
+    final match = RegExp(r'SF(\d{3})', caseSensitive: false).firstMatch(value);
+    if (match == null) return null;
+    return int.tryParse(match.group(1)!);
+  }
+
+  static Map<String, List<String>> _ensureQuestionCountPerDomain(
+    Map<String, List<String>> source, {
+    required Map<String, Map<String, List<String>>> languageBank,
+    required Map<String, Map<String, List<String>>> fallbackEn,
+    required String primaryFallbackKey,
+    required bool includeCdcGrossMotorAnchors,
+    int? minSfCode,
+    int count = 15,
+  }) {
+    final languageFallbackPrimary =
+        languageBank[primaryFallbackKey] ?? const <String, List<String>>{};
+    final englishFallbackPrimary =
+        fallbackEn[primaryFallbackKey] ?? const <String, List<String>>{};
+    final languageFallbackDefault =
+        languageBank['13-24'] ?? const <String, List<String>>{};
+    final englishFallbackDefault =
+        fallbackEn['13-24'] ?? const <String, List<String>>{};
+    final normalized = <String, List<String>>{};
+
+    for (final domain in _domains) {
+      bool allowedBySfFloor(String question) {
+        if (minSfCode == null) return true;
+        final sf = _extractSfNumber(question);
+        // Keep non-SF items (CDC/clinical fallbacks) eligible.
+        if (sf == null) return true;
+        return sf >= minSfCode;
+      }
+
+      final base = <String>[
+        for (final q in (source[domain] ?? const <String>[]))
+          if (allowedBySfFloor(q)) q,
+      ];
+      if (includeCdcGrossMotorAnchors && domain == 'GM') {
+        final anchors =
+            _cdcGrossMotorByFineBand[primaryFallbackKey] ?? const <String>[];
+        for (final q in anchors.reversed) {
+          if (!base.contains(q)) {
+            base.insert(0, q);
+          }
+        }
+      }
+      final used = <String>{for (final q in base) _questionKey(q)};
+      final allLanguageDomainQuestions = <String>[
+        for (final band in languageBank.values) ...?(band[domain]),
+      ];
+      final allEnglishDomainQuestions = <String>[
+        for (final band in fallbackEn.values) ...?(band[domain]),
+      ];
+
+      void appendFrom(
+        List<String> items, {
+        bool enforceSfFloor = true,
+      }) {
+        for (final q in items) {
+          if (base.length >= count) return;
+          if (enforceSfFloor && !allowedBySfFloor(q)) continue;
+          final key = _questionKey(q);
+          if (used.contains(key)) continue;
+          used.add(key);
+          base.add(q);
+        }
+      }
+
+      if (base.length > count) {
+        base.removeRange(count, base.length);
+      } else if (base.length < count) {
+        appendFrom(languageFallbackPrimary[domain] ?? const <String>[]);
+        appendFrom(englishFallbackPrimary[domain] ?? const <String>[]);
+        appendFrom(languageFallbackDefault[domain] ?? const <String>[]);
+        appendFrom(englishFallbackDefault[domain] ?? const <String>[]);
+        appendFrom(allLanguageDomainQuestions);
+        appendFrom(allEnglishDomainQuestions);
+        if (base.length < count) {
+          // If strict SF-floor filtering cannot fill the domain, relax filter
+          // so we still return a complete set.
+          appendFrom(
+            allLanguageDomainQuestions,
+            enforceSfFloor: false,
+          );
+          appendFrom(
+            allEnglishDomainQuestions,
+            enforceSfFloor: false,
+          );
+        }
+      }
+
+      if (base.length > count) {
+        base.removeRange(count, base.length);
+      }
+      normalized[domain] = base;
+    }
+
+    return normalized;
   }
 
   static const Map<String, Map<String, Map<String, List<String>>>> _banks = {
@@ -22,6 +286,32 @@ class QuestionBank {
 
   // English questions
   static const Map<String, Map<String, List<String>>> _bankEn = {
+    // PDF-style fine-grained age bands
+    '0-3': _q0To12En,
+    '3-6': _q0To12En,
+    '6-9': _q0To12En,
+    '9-12': _q0To12En,
+    '12-15': _q12To24En,
+    '15-18': _q12To24En,
+    '18-21': _q12To24En,
+    '21-24': _q12To24En,
+    '24-27': _q24To36En,
+    '27-30': _q24To36En,
+    '30-33': _q24To36En,
+    '33-36': _q24To36En,
+    '36-39': _q36To48En,
+    '39-42': _q36To48En,
+    '42-45': _q36To48En,
+    '45-48': _q36To48En,
+    '48-51': _q48To60En,
+    '51-54': _q48To60En,
+    '54-57': _q48To60En,
+    '57-60': _q48To60En,
+    '60-63': _q60To72En,
+    '63-66': _q60To72En,
+    '66-69': _q60To72En,
+    '69-72': _q60To72En,
+    // Coarse legacy keys (kept for compatibility)
     '0-12': _q0To12En,
     '13-24': _q12To24En,
     '25-36': _q24To36En,
@@ -129,39 +419,94 @@ class QuestionBank {
     ],
   };
 
-  // 13-24 months (English) - 12-24 months clinical milestones
+  // 13-24 months (English) - 15 questions per domain from GSED Short Form
+  // item guide (PDFs shared by user). Cognitive domain is supplemented with
+  // 2 CDC cognitive milestones to ensure exactly 15 questions per domain.
   static const Map<String, List<String>> _q12To24En = {
     'GM': [
-      'SF076: Can your child stand up from sitting and take several steps forward?',
-      'SF079: Can your child move around by walking rather than crawling?',
-      'SF080: Can your child walk well, with coordination?',
-      'SF083: Can your child kick a ball forward using his/her foot?',
-      'SF089: Can your child run well without falling?',
+      'SF059: Can your child walk several steps while holding onto a person or object (e.g. wall, furniture)?',
+      'SF060: While holding onto furniture, does your child bend down and pick up a small object from the floor and then return to a standing position?',
+      'SF061: While holding onto furniture, does your child squat with control (without falling or flopping down)?',
+      'SF064: Can your child stand up without holding onto anything, even if just for a few seconds?',
+      'SF066: Can your child maintain a standing position on his/her own, without holding on or receiving support?',
+      'SF068: Can your child climb onto an object (rock, porch, step, chair, bed, low table, etc.)?',
+      'SF070: Can your child bend down or squat to pick up an object from the floor and then stand up again, without help from a person or object?',
+      'SF074: Can your child take several steps (3 to 5) forward without holding onto any person or object, even if your child falls down immediately afterwards?',
+      'SF076: Can your child stand up from sitting by him-/herself and take several steps forward?',
+      'SF079: Can your child move around by walking, rather than by crawling on his/her hands and knees?',
+      'SF080: Can your child walk well, with coordination, without falling down often and with one foot in front of the other (rather than shifting weight side-to-side, stiff-legged)?',
+      'SF083: Can your child kick a ball or other round object forward using his/her foot?',
+      'SF089: Can your child run well, without falling or bumping into objects?',
+      'SF091: While standing, can your child kick a ball by swinging his/her leg forward?',
+      'SF096: Can your child walk on an uneven surface (e.g. a bumpy or steep road) without falling?',
     ],
     'FM': [
-      'SF054: Does your child use a spoon with some spilling?',
-      'SF056: Can your child stack two small blocks on top of each other?',
-      'SF062: Can your child scribble on paper with a crayon or pencil?',
-      'SF067: Can your child stack three small blocks on top of each other?',
-      'SF069: Can your child turn pages of a book?',
-      'SF075: Can your child stack four or more small blocks on top of each other?',
+      'SF035: Can your child reach for AND HOLD an object, at least for a few seconds?',
+      'SF040: Can your child pick up a small object (e.g. a piece of food, small toy or small stone) using just one hand?',
+      'SF051: Can your child pass a small object from one hand to the other?',
+      'SF052: Can your child bang objects together or bang an object on a table or on the ground?',
+      'SF053: Can your child pick up small bits of food and feed him-/herself using his/her hand?',
+      'SF054: Can your child pick up and drop a small object (e.g. a piece of food, small toy or small stone) into a bucket or bowl while sitting?',
+      'SF056: Can your child pick up a small object (e.g. a piece of food, small toy or small stone) with just his/her thumb and one finger?',
+      'SF067: Can your child drink from an open cup without help?',
+      'SF069: Can your child make any light marks on paper or in dirt with a crayon or a stick?',
+      'SF075: While standing, can your child purposefully throw a ball and not just drop it?',
+      'SF077: Can your child break off a piece of food and feed it to him-/herself?',
+      'SF078: Can your child make a scribble on paper, or in dirt, in a back-and-forth manner?',
+      'SF081: Can your child stack at least 2 objects on top of each other, such as bottle tops, blocks, stones, etc.?',
+      'SF095: Can your child stack 3 or more small objects (e.g. blocks, cups, bottle caps) on top of each other?',
+      'SF101: Can your child unscrew the lid from a bottle or jar?',
     ],
     'LC': [
-      'SF104: Does your child say at least one meaningful word (besides "mama" or "dada")?',
-      'SF105: Does your child combine two words together?',
-      'SF106: Can your child say his/her own name when asked?',
-      'SF107: Can your child name at least one object when shown a picture?',
-    ],
-    'COG': [
       'SF071: Can your child follow a simple spoken command or direction without you making a gesture?',
       'SF072: Can your child fetch something when asked?',
-      'SF085: Can your child follow directions with more than 1 step?',
+      'SF082: Can your child greet people either by giving his/her hand or saying "Hello"?',
+      'SF084: Can your child say 5 or more separate words (e.g. names such as "Mama" or objects such as "ball")?',
+      'SF085: Can your child follow directions with more than 1 step, for example, "Go to the kitchen and bring me a spoon"?',
+      'SF086: Can your child correctly name at least 1 family member other than mom and dad (e.g. name of brother, sister, aunt, uncle)?',
       'SF087: Can your child identify at least 7 objects?',
+      'SF088: Can your child ask for something (e.g. food, water) by name when he/she wants it?',
+      'SF094: If you show your child an object he/she knows well (e.g. a cup or animal), can he/she consistently name it?',
+      'SF097: Does your child usually communicate with words what he/she wants in a way that is understandable to others?',
+      'SF098: Can your child say 10 or more words in addition to "Mama" and "Dada"?',
+      'SF100: Can your child speak using short sentences of 2 words that go together (e.g. "Mama go" or "Dada eat")?',
+      'SF104: Can your child speak using sentences of 3 or more words that go together (e.g. "I want water", or "The house is big")?',
+      'SF109: Can your child tell you or someone familiar his/her own name (or nickname) when asked?',
+      'SF110: Can your child correctly ask questions using any of the words "What", "Which", "Where" or "Who"?',
+    ],
+    'COG': [
+      'SF006: Does your child look at and focus on objects in front of him/her?',
+      'SF042: If an object falls to the ground out of view, does your child look for it?',
+      'SF046: Does your child look for an object of interest when it is removed from sight or hidden from him/her (e.g. put under a cover, behind another object)?',
+      'SF048: Does your child intentionally move or change his/her position to get objects that are out of reach?',
+      'SF058: Does your child stop what he/she is doing when you say "Stop!", even if just for a second?',
+      'SF071: Can your child follow a simple spoken command or direction without you making a gesture?',
+      'SF072: Can your child fetch something when asked?',
+      'SF085: Can your child follow directions with more than 1 step, for example, "Go to the kitchen and bring me a spoon"?',
+      'SF087: Can your child identify at least 7 objects?',
+      'SF115: Does your child pronounce most of his/her words correctly?',
+      'SF116: Can your child go to the toilet by him-/herself?',
+      'SF120: Can your child draw a straight line?',
+      'SF123: Does your child regularly use descriptive words such as "fast", "short", "hot", "fat" or "beautiful" correctly?',
+      'CDC-C1: Does your child try to use things the right way, like a phone, cup, or book?',
+      'CDC-C2: Does your child play with more than one toy at the same time, like putting toy food on a toy plate?',
     ],
     'SE': [
-      'SF073: Does your child share with others?',
+      'SF001: Does your child smile?',
+      'SF003: Does your child look at your face when you speak to him/her?',
+      'SF009: Does your child smile when you smile at or talk with him/her?',
+      'SF011: Does your child stop crying or calm down when you come into the room after being out of sight or when you pick him/her up?',
+      'SF013: When you are about to pick up your child, does he/she act happy or excited?',
+      'SF019: Does your child move excitedly, kick legs, move arms or trunk or make cooing noises when a known person enters the room or speaks to him/her?',
+      'SF020: Does your child make noise or gestures to get your attention?',
+      'SF021: If you play a game with your child, does he/she respond with interest?',
+      'SF022: Does your child recognize you or other family members (e.g. smile when someone enters a room or moves towards the child)?',
+      'SF024: Does your child smile or become excited when seeing someone familiar?',
+      'SF027: Is your child interested when he/she sees other children playing?',
+      'SF073: Does your child share with others (e.g. food)?',
       'SF082: Can your child greet people either by giving his/her hand or saying "Hello"?',
-      'SF093: Does your child show independence?',
+      'SF093: Does your child show independence (e.g. wants to visit a friend’s house)?',
+      'SF102: Does your child help out around the house with simple chores, even if he/she does not do them well?',
     ],
   };
 

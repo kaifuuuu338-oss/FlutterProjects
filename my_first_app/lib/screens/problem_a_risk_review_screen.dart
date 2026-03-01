@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:my_first_app/core/utils/baseline_risk_scoring.dart';
 import 'package:my_first_app/core/utils/problem_a_risk_engine.dart';
 import 'package:my_first_app/screens/behavioral_psychosocial_summary_screen.dart';
 
@@ -87,18 +88,25 @@ class ProblemARiskReviewScreen extends StatelessWidget {
       health: health,
       environment: environmentInput,
     );
+    final baseline = calculateBaselineRisk(
+      autismRisk: autismRisk,
+      adhdRisk: adhdRisk,
+      behaviorRisk: behaviorRisk,
+      delaySummary: delaySummary,
+    );
 
     final mergedExplainability = [
       ...result.reasons,
       if (congenitalDefect) 'Congenital defect flag is present',
       if (hearingConcern) 'Hearing concern is present',
       if (visionConcern) 'Vision concern is present',
-      if (immunizationStatus == 'none' || immunizationStatus == 'partial') 'Immunization is incomplete',
+      if (immunizationStatus == 'none' || immunizationStatus == 'partial')
+        'Immunization is incomplete',
     ].join(', ');
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Screening 4/4 - Composite Risk Review'),
+        title: const Text('Screening 4/4 - Baseline Risk Review'),
         backgroundColor: const Color(0xFF0D5BA7),
         foregroundColor: Colors.white,
       ),
@@ -111,12 +119,19 @@ class ProblemARiskReviewScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Problem A Composite Risk', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                  const Text(
+                    'Problem A Baseline Risk',
+                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+                  ),
                   const SizedBox(height: 8),
-                  Text('Score: ${result.score}'),
-                  Text('Category: ${result.category}'),
-                  Text('Stimulation Score (0-10): ${result.stimulationNormalized.toStringAsFixed(2)}'),
-                  Text('Low Stimulation: ${result.lowStimulation ? "Yes" : "No"}'),
+                  Text('Score: ${baseline.score}'),
+                  Text('Category: ${baseline.category}'),
+                  Text(
+                    'Stimulation Score (0-10): ${result.stimulationNormalized.toStringAsFixed(2)}',
+                  ),
+                  Text(
+                    'Low Stimulation: ${result.lowStimulation ? "Yes" : "No"}',
+                  ),
                   Text('Underweight: ${result.underweight ? "Yes" : "No"}'),
                   Text('WAZ: ${result.waz?.toStringAsFixed(2) ?? "N/A"}'),
                   Text('Stunted: ${result.stunted ? "Yes" : "No"}'),
@@ -127,7 +142,9 @@ class ProblemARiskReviewScreen extends StatelessWidget {
                   Text('Nutrition Score: ${result.nutritionScore}'),
                   Text('Nutrition Risk: ${result.nutritionRisk}'),
                   Text('LBW: ${result.lbw ? "Yes" : "No"}'),
-                  Text('Early Warning: ${result.earlyWarning ? "Triggered" : "No"}'),
+                  Text(
+                    'Early Warning: ${result.earlyWarning ? "Triggered" : "No"}',
+                  ),
                 ],
               ),
             ),
@@ -139,12 +156,17 @@ class ProblemARiskReviewScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Explainability', style: TextStyle(fontWeight: FontWeight.w800)),
+                  const Text(
+                    'Explainability',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
                   const SizedBox(height: 8),
-                  ...result.reasons.map((r) => Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
-                        child: Text('- $r'),
-                      )),
+                  ...result.reasons.map(
+                    (r) => Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text('- $r'),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -164,19 +186,21 @@ class ProblemARiskReviewScreen extends StatelessWidget {
                     autismRisk: autismRisk,
                     adhdRisk: adhdRisk,
                     behaviorRisk: behaviorRisk,
-                    baselineScore: result.score,
-                    baselineCategory: result.category,
                     immunizationStatus: immunizationStatus,
                     weightKg: weightKg,
                     heightCm: heightCm,
                     muacCm: muacCm,
                     birthWeightKg: birthWeightKg,
                     hemoglobin: hemoglobin,
-                    illnessHistory: recentIllness == 'Yes' ? 'Recent illness: Yes' : 'No recent illness',
+                    illnessHistory: recentIllness == 'Yes'
+                        ? 'Recent illness: Yes'
+                        : 'No recent illness',
                     domainScores: domainScores,
                     domainRiskLevels: domainRiskLevels,
                     missedMilestones: missedMilestones,
-                    explainability: mergedExplainability.isEmpty ? explainability : mergedExplainability,
+                    explainability: mergedExplainability.isEmpty
+                        ? explainability
+                        : mergedExplainability,
                     delaySummary: delaySummary,
                   ),
                 ),

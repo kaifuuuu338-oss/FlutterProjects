@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import re
+import sys
 from dataclasses import dataclass
 from typing import Any, Iterable
 
@@ -19,6 +21,7 @@ def _translate_sql(query: str) -> str:
         raise ValueError("Use PostgreSQL placeholders (%s), not '?'.")
     if "ifnull(" in lowered:
         raise ValueError("Use PostgreSQL COALESCE(...) instead of ifnull(...).")
+    # No escaping needed - main.py should use proper syntax for CREATE OR REPLACE FUNCTION
     return query
 
 
@@ -79,7 +82,21 @@ class ConnectionCompat:
 
     def execute(self, query: str, params: Iterable[Any] | None = None) -> CursorCompat:
         cur = self._conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute(_translate_sql(query), tuple(params or ()))
+        params_tuple = tuple(params or ())
+        translated = _translate_sql(query)
+        
+        # Debug problematic queries
+        if params_tuple:
+            try:
+                cur.execute(translated, params_tuple)
+            except Exception as e:
+                if "syntax error at or near" in str(e):
+                    print(f"DEBUG: Query with params - Original:\n{query[:300]}", file=sys.stderr)
+                    print(f"DEBUG: Translated:\n{translated[:300]}", file=sys.stderr)
+                    print(f"DEBUG: Params: {params_tuple}", file=sys.stderr)
+                raise
+        else:
+            cur.execute(translated)
         return CursorCompat(cur)
 
     def cursor(self) -> CursorCompat:
